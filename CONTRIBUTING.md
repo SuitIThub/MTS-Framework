@@ -4,9 +4,7 @@ Thanks for wanting to help. This repo is the framework's source and the source o
 the developer wiki. You do **not** need to write code to contribute — ideas, bug reports,
 and wiki pages all count.
 
-The framework is built for adult games. Contributors must be adults. Treat other people in Issues,
-Discussions, and PRs with the same respect you'd want in a small workshop, not a
-comment section.
+Treat other people in Issues, Discussions, and PRs with the same respect you'd want in a small workshop, not a comment section.
 
 ## Where things go
 
