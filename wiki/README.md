@@ -1,0 +1,115 @@
+# Wiki source
+
+This folder **is** the GitHub Wiki. Every top-level `*.md` file becomes a wiki page
+(the filename, with hyphens shown as spaces, is the page title). Optional character pages can be
+authored under `characters/<Name>/` next to their images; the sync **promotes** each
+`<Name>.md` to the wiki root so GitHub can open it. `_Sidebar.md` and `_Footer.md` are
+the wiki's navigation chrome. These files are the single source of truth — edit them
+here and publish with the sync script.
+
+> `README.md` (this file) and the `scripts/` folder are **not** published to the
+> wiki. The sync copies top-level pages **and** extra directories such as
+> `characters/` (each character page lives with its card images).
+
+## Structure
+
+| Page | Section |
+|------|---------|
+| `Home.md` | landing page |
+| `_Sidebar.md` / `_Footer.md` | navigation chrome |
+| `Cheat-Menu.md` | 🎛️ tools |
+| `Developer-Guide.md` | 🛠️ developer section landing |
+| `How-to-Contribute.md` | 🛠️ discussions vs issues, PRs, wiki edits |
+| `Modding.md` | 🛠️ modding quick-start |
+| `Building-Situations.md`, `Building-Unlockables.md` | 🛠️ content guides |
+| `Events.md`, `Conditions.md`, `Value-Ranges.md`, `Selectors.md`, `Effects.md`, `Modifiers.md`, `Options.md`, `Items-and-Inventory.md`, `Maps.md`, `Dialogue.md`, `Paperdoll.md`, `Images.md`, `Journal-Alerts.md` | 🛠️ system guides |
+
+All pages are **hand-authored here**. Wiki pages have no `# H1` (GitHub shows the page
+title from the filename) and link to each other with `[Label](Page-Name)`; in-page
+section links (`[text](#heading)`) work as on GitHub. "Related files" bullets point to
+the actual source in `game/scripts/…` — those `.rpy` paths are the code the guide
+documents.
+
+## Publishing
+
+`sync-wiki.ps1` (PowerShell, the repo's primary shell) publishes the folder. A
+`sync-wiki.bat` wrapper sits next to it so you can **double-click it in the IDE /
+Explorer**; it runs the `.ps1` and pauses so you can read the output.
+
+```powershell
+pwsh wiki/scripts/sync-wiki.ps1                       # auto commit message
+pwsh wiki/scripts/sync-wiki.ps1 -Message "Update situation guide"
+```
+
+The sync script:
+
+1. Derives the wiki remote from `origin` (`…/<repo>.wiki.git`).
+2. Clones/updates the wiki repo into `wiki/.wiki-repo/` (git-ignored).
+3. Mirrors the top-level `*.md` pages (except `README.md`) into it — additions,
+   changes, **and deletions**.
+4. Mirrors extra directories such as `characters/` **byte-for-byte** for the
+   original cards (no transcoding or renaming).
+5. Promotes each `characters/<Name>/<Name>.md` to a top-level wiki page (GitHub
+   Wiki cannot navigate nested `characters/…` paths — they resolve as the
+   Characters index).
+6. Writes a sibling `*.preview.png` next to each card (PNG through IEND only)
+   so pages can show a light thumbnail.
+7. Commits and pushes.
+
+Pushing needs the same GitHub credentials you use for the main repo. The wiki must
+already exist (create one page in the repo's *Wiki* tab once, then the `.wiki.git`
+repo is available).
+
+## Adding a page
+
+1. Create `My-Page.md` in this folder (hyphens for spaces, no `# H1`).
+2. Add a link to it in `_Sidebar.md` (and wherever else it belongs).
+3. Run the sync.
+
+## Character pages and card images
+
+Each character has a folder under `characters/` that holds the wiki page **and**
+the image files. Edit the page there; the sync publishes it as a top-level wiki
+page named `<Name>` (so `[Jane Doe](Jane-Doe)` works). Images stay in the
+folder and are copied as-is.
+
+```
+characters/Jane-Doe/
+  Jane-Doe.md      ← wiki page
+  portrait.png        ← drop the main card here
+  outfits/            ← drop outfit cards here
+```
+
+The PNGs are Honey Select 2 / StudioNeoV2 character cards: extra binary data sits
+after the image payload and is **keyed to the original filename**. Rules:
+
+- Drop files in as-is. **Never rename, recompress, re-export, or open-and-save**
+  them in an image editor.
+- If the card's filename is not `portrait.png` / `outfit-1.png`, keep that
+  original name and change the links on the character page to match.
+- Wiki pages **display** a sibling `*.preview.png` (the same picture, PNG payload
+  only — no card trailer). Sync generates those copies; do not hand-edit them.
+- The `<img src>` on a character page must use `….preview.png`. The surrounding
+  `<a href>` stays on the original `….png` so a click still downloads the full
+  card (`raw.githubusercontent.com/wiki/…`).
+- Do not upload cards through the GitHub Wiki web UI — that can rename or
+  recompress them. Always drop files into `wiki/characters/…` and run the sync.
+
+## UI screenshots
+
+`wiki/screenshots/` holds UI screenshots rendered by the game itself (fixed
+1920×1080, quick menu hidden), not desktop captures.
+
+1. Start the game from the SDK (developer mode), load a save that is on the map.
+2. Open the console (**Shift+O**) and run `jump wiki_screenshots`. The label
+   (`game/scripts/wiki_screenshots.rpy`) writes one PNG per shot and restores
+   inventory, cart and notifications afterwards.
+3. Run `python wiki/scripts/compress-screenshots.py`, which converts the PNGs to
+   WebP and deletes the PNGs.
+4. Run the sync. Pages embed the shots via
+   `<img src="https://raw.githubusercontent.com/wiki/<owner>/<repo>/screenshots/<name>.webp" width="720">`.
+
+To add a shot, append a block to the label:
+`call screen wiki_shot_frame("<name>", "<screen>", *screen_args)`. The wrapper
+takes the picture with a timer, which also works for modal screens. Only capture
+UI screens. No event scenes (spoilers, adult content).

@@ -1,0 +1,18 @@
+{
+    "version": "0.2",
+    "ignorePaths": [],
+    "dictionaryDefinitions": [],
+    "dictionaries": [],
+    "words": [
+        "curr",
+        "fadein",
+        "getitem",
+        "hasattr",
+        "issubclass",
+        "paperdoll",
+        "renpy",
+        "rpyc"
+    ],
+    "ignoreWords": [],
+    "import": []
+}

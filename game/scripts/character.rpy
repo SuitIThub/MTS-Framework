@@ -1,0 +1,1388 @@
+init -6 python:
+    from typing import Dict, Any, Union, Tuple
+    import math
+
+    ########################
+    # region CLASSES ----- #
+    ########################
+
+    class Char:
+        """
+        A character object that contains all the stats and information about a character
+
+        ### Attributes:
+        1. name: str
+            - The name of the character
+            - The name refers to the id representing the character. The actual name of the character is in title
+        2. title: str
+            - The title of the character
+            - The title is the actual name of the character
+        3. level: Stat
+            - The level of the character
+            - The level is a stat object that contains the level of the character
+        4. stats_objects: Dict[str, Stat]
+            - A dictionary of all the stats of the character
+            - The key is the name of the stat and the value is the stat object
+
+        ### Methods:
+        1. _update(data: Dict[str, Any] = None) -> None
+            - Is used to supplement new attributes added in a new version for an older game save
+        2. get_name() -> str
+            - Returns the name of the character
+        3. get_title() -> str
+            - Returns the title of the character
+        4. check_stat_exists(stat: str) -> bool
+            - Checks if the stat exists in the character
+        5. get_stat_obj(stat: str) -> Stat
+            - Returns the stat object of the stat
+        6. set_stat(stat: str, value) -> None
+            - Sets the value of the stat
+        7. change_stat(stat: str, delta) -> None
+            - Changes the value of the stat by delta
+        8. get_stat_number(stat: str)
+            - Returns the value of the stat
+        9. get_stat_string(stat: str) -> str
+            - Returns the value of the stat as a string
+        10. reset_changed_stats() -> None
+            - Resets the change of all the stats
+        11. get_stats() -> Dict[str, Stat]
+            - Returns the dictionary of all the stats
+        12. check_stat(stat: str, value | str) -> bool
+            - Checks if the stat equals the value
+        13. display_stat(stat: str) -> str
+            - Returns the stat as a string with the change
+        14. get_display_value(stat: str) -> str
+            - Returns the value of the stat as a string
+        15. get_display_change(stat: str) -> str
+            - Returns the change of the stat as a string
+        16. get_level() -> int
+            - Returns the level of the character
+        17. get_level_str() -> str
+            - Returns the level of the character as a string
+        18. get_level_obj() -> Stat
+            - Returns the level object of the character
+        19. set_level(level: int) -> None
+            - Sets the level of the character
+        20. get_nearest_level_delta(level: int) -> int
+            - Returns the difference between level and the level of the current character
+        21. check_level(value | str, test_level: int = None) -> bool
+            - Checks if the level equals the value
+
+        ### Parameters:
+        1. name: str
+            - The name of the character
+        2. title: str
+            - The title of the character
+        """
+
+        def __init__(self, name, title):
+            """
+            The constructor for the character object
+
+            ### Parameters:
+                1. name: str
+                    - The name of the character
+                2. title: str
+                    - The title of the character
+            """
+
+            self.name = name
+            self.title = title
+            self.level = Stat("level", 0)
+            self.stats_objects = {}
+            
+        def _update(self, data: Dict[str, Any] = None):
+            """
+            Is used to supplement new attributes added in a new version for an older game save
+
+            ### Parameters:
+                1. data: Dict[str, Any] (default None)
+                    - The data to update the character with
+            """
+
+            if data != None:
+                self.__dict__.update(data)
+
+            if not hasattr(self, 'level'):
+                self.level = Stat("level", 0)
+            if not hasattr(self, 'stats_objects'):
+                self.stats_objects = {}
+
+        def __str__(self):
+            return self.get_name()
+
+        def check_stat_exists(self, stat: str) -> bool:
+            """
+            Checks if the stat exists in the character
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to check
+
+            ### Returns:
+            1. bool
+                - True if the stat exists
+                - False if the stat does not exist
+            """
+
+            return stat in self.stats_objects.keys()
+
+        ###########################
+        # region Attribute getter #
+
+        def get_name(self) -> str:
+            """
+            Returns the name of the character
+
+            ### Returns:
+            1. str
+                - The name of the character
+                - The name refers to the id representing the character. The actual name of the character is in title
+            """
+
+            return self.name
+
+        def get_title(self) -> str:
+            """
+            Returns the title of the character
+
+            ### Returns:
+            1. str
+                - The title of the character
+                - The title is the actual name of the character
+            """
+
+            return self.title
+
+        def get_stat_obj(self, stat: str):
+            """
+            Returns the stat object of the stat
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to get
+
+            ### Returns:
+            1. Stat
+                - The stat object of the stat
+                - None if the stat does not exist
+            """
+
+            if stat not in self.stats_objects.keys():
+                return None
+            return self.stats_objects[stat]
+
+        # endregion
+        ###########################
+
+        #######################
+        # region Stat handler #
+
+        def set_stat(self, stat: str, value):
+            """
+            Sets the value of the stat
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to set
+            2. value
+                - The value to set the stat to
+            """
+
+            if is_in_replay:
+                return
+
+            stat_obj = self.get_stat_obj(stat)
+            if stat_obj == None:
+                return
+            stat_obj.set_value(value, self.get_level())
+
+        def change_stat(self, stat: str, delta):
+            """
+            Changes the value of the stat by delta
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to change
+            2. delta
+                - The value to change the stat by
+            """
+
+            if is_in_replay:
+                return
+
+            stat_obj = self.get_stat_obj(stat)
+            if stat_obj == None:
+                return
+            stat_obj.change_value(delta, self.get_level())
+
+        def get_stat_number(self, stat: str):
+            """
+            Returns the value of the stat
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to get
+
+            ### Returns:
+            1. num
+                - The value of the stat
+                - -1 if the stat does not exist
+            """
+
+            stat_obj = self.get_stat_obj(stat)
+
+            if stat_obj == None:
+                return -1
+            return stat_obj.get_value()
+
+        def get_stat_string(self, stat: str) -> str:
+            """
+            Returns the value of the stat as a string
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to get
+
+            ### Returns:
+            1. str
+                - The value of the stat as a string
+                - "-1" if the stat does not exist
+            """
+
+            return str(self.get_stat_number(stat))
+
+        def reset_changed_stats(self):
+            """
+            Resets the change of all the stats
+            """
+
+            if is_in_replay:
+                return
+
+            self.level.reset_change()
+            for stat_key in self.stats_objects.keys():
+                stat_obj = self.get_stat_obj(stat_key)
+
+                if stat_obj == None:
+                    continue
+
+                stat_obj.reset_change()
+
+        def get_stats(self):
+            """
+            Returns the dictionary of all the stats
+
+            ### Returns:
+            1. Dict[str, Stat]
+                - The dictionary of all the stats
+            """
+
+            return self.stats_objects
+
+        def check_stat(self, stat: str, value) -> bool:
+            """
+            Checks if the stat equals the value
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to check
+            2. value | str
+                - The value to check the stat against
+                - value can be a number or a special string representing a set of values
+
+            ### Returns:
+            1. bool
+                - True if the stat equals the value
+                - False if the stat does not equal the value
+            """
+
+            if value == "x":
+                return True
+
+            return get_value_diff(value, self.get_stat_number(stat)) >= 0
+
+        def display_stat(self, stat: str) -> str:
+            """
+            Returns the stat as a string with the change
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to get
+
+            ### Returns:
+            1. str
+                - The stat as a string with the change
+                - "NaN" if the stat does not exist
+            """
+
+            stat_obj = self.get_stat_obj(stat)
+
+            if stat_obj == None:
+                return "NaN"
+
+            return stat_obj.display_stat()
+
+        def get_display_value(self, stat: str) -> str:
+            """
+            Returns the value of the stat as a string
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to get
+
+            ### Returns:
+            1. str
+                - The value of the stat as a string
+                - "NaN" if the stat does not exist
+            """
+
+            stat_obj = self.get_stat_obj(stat)
+
+            if stat_obj == None:
+                return "NaN"
+
+            return stat_obj.get_display_value()
+
+        def get_display_change(self, stat: str) -> str:
+            """
+            Returns the change of the stat as a string
+
+            ### Parameters:
+            1. stat: str
+                - The name of the stat to get
+
+            ### Returns:
+            1. str
+                - The change of the stat as a string
+                - "NaN" if the stat does not exist
+            """
+
+            stat_obj = self.get_stat_obj(stat)
+
+            if stat_obj == None:
+                return "NaN"
+
+            return stat_obj.get_display_change()
+    
+        # endregion
+        #######################
+
+        ########################
+        # region Level handler #
+
+        def get_level(self) -> int:
+            """
+            Returns the level of the character
+
+            ### Returns:
+            1. int
+                - The level of the character
+            """
+
+            return self.level.get_value()
+
+        def get_level_str(self) -> str:
+            """
+            Returns the level of the character as a string
+
+            ### Returns:
+            1. str
+                - The level of the character as a string
+            """
+
+            return str(self.get_level())
+
+        def get_level_obj(self):
+            """
+            Returns the level object of the character
+
+            ### Returns:
+            1. Stat
+                - The level object of the character
+            """
+
+            return self.level
+
+        def set_level(self, level: int):
+            """
+            Sets the level of the character
+
+            ### Parameters:
+            1. level: int
+                - The level to set the character to
+            """
+
+            if is_in_replay:
+                return
+
+            level = clamp_value(level, 0, 10)
+            self.level.set_value(level)
+
+        def get_nearest_level_delta(self, level: int) -> int:
+            """
+            Returns the difference between level and the level of the current character
+
+            ### Parameters:
+            1. level: int
+                - The level to check against
+
+            ### Returns:
+            1. int
+                - The difference between level and the level of the current character
+            """
+
+            for i in range(self.get_level(), 11):
+                if self.check_level(level, i):
+                    return self.get_level() - i
+
+        def check_level(self, value, test_level: int = None) -> bool:
+            """
+            Checks if the level equals the value
+
+            ### Parameters:
+            1. value | str
+                - The value to check the level against
+                - value can be a number or a special string representing a set of values
+            2. test_level: int (default None)
+                - The level to check against
+                - If None, the level of the character is used
+
+            ### Returns:
+            1. bool
+                - True if the level equals the value
+                - False if the level does not equal the value
+            """
+
+            if value == "x":
+                return True
+
+            if test_level == None:
+                test_level = self.get_level()
+            return get_value_diff(value, test_level) >= 0
+    
+        # endregion
+        ########################
+
+    # endregion
+    ########################
+
+    ##############################
+    # region School Char Handler #
+
+    def get_school() -> Char:
+        """
+        Gets a random school
+
+        ### Returns:
+        1. Char
+            - The random school
+        """
+        
+        if 'school' not in charList.keys():
+            fix_schools()
+
+        return charList['school']
+
+    def get_school_stat(stat: str):
+        """
+        Gets the mean value of a stat from the mean school character
+
+        ### Parameters:
+        1. stat: str
+            - The stat name for which the mean value is searched
+
+        ### Returns:
+        1. num
+            - The mean value of the stat for all schools
+        """
+
+        if stat == MONEY:
+            return money.get_value()
+        elif stat == LEVEL:
+            return get_level_for_char(stat, get_school())
+        else:
+            return get_stat_number(stat)
+
+    def display_school_stat(stat: str) -> str:
+        """
+        Returns the mean value for a stat from all schools as string with the change
+
+        ### Parameters:
+        1. stat: str
+            - The name of the stat whose mean value with the change from all schools will be returned
+
+        ### Returns:
+        1. str
+            - The mean value of the stat from all schools as string with the change
+        """
+
+        if stat == MONEY:
+            return money.display_stat()
+        else:
+            return get_school().display_stat(stat)
+
+    def get_school_stat_value(stat: str) -> str:
+        """
+        Returns the mean value for a stat from all schools as string
+
+        ### Parameters:
+        1. stat: str
+            - The name of the stat whose mean value from all schools will be returned
+
+        ### Returns:
+        1. str
+            - The mean value of the stat from all schools as string
+        """
+
+        if stat == MONEY:
+            return re.sub("\..+", "", money.get_display_value())
+        else:
+            return get_school().get_display_value(stat)
+
+    def get_school_stat_change(stat: str) -> str:
+        """
+        Returns the mean change for a stat from all schools as string
+
+        ### Parameters:
+        1. stat: str
+            - The name of the stat whose mean change from all schools will be returned
+
+        ### Returns:
+        1. str
+            - The mean change of the stat from all schools as string
+        """
+
+        if stat == MONEY:
+            return money.get_display_change()
+        else:
+            return get_school().get_display_change(stat)
+
+    # endregion
+    ##############################
+
+    ###############################
+    # region General Char Handler #
+
+    def get_character(name: str, map: Dict[str, Union[Char, Dict[str, Any]]]) -> Char:
+        """
+        Returns the character object from the map
+
+        ### Parameters:
+        1. name: str
+            - The name of the character to get
+        2. map: Dict[str, Char | Dict[str, Any]]
+            - The map of characters to get the character from
+
+        ### Returns:
+        1. Char
+            - The character object from the map
+            - None if the character does not exist
+        """
+
+        if name not in map.keys():
+            return None
+
+        return map[name]
+
+    def get_character_by_key(key: str) -> Char:
+        """
+        Returns the character object from the map
+
+        ### Parameters:
+        1. key: str
+            - The key of the character to get
+            - school, parent, teacher, secretary
+
+        ### Returns:
+        1. Char
+            - The character object from the map
+            - None if the character does not exist
+            - possible keys: school, parent, teacher, secretary
+        """
+
+        if key == "school":
+            return get_school()
+        elif key == "parent":
+            return get_character("parent", charList)
+        elif key == "teacher":
+            return get_character("teacher", charList['staff'])
+        elif key == "secretary":
+            return get_character("secretary", charList['staff'])
+        return None
+
+    # endregion
+    ###############################
+
+    ############################
+    # region Char Stat Handler #
+
+    def get_stat_number(stat: str) -> float:
+        return get_school().get_stat_number(stat)
+
+    def change_stat(stat: str, change):
+        """
+        Changes the stat value for a character or the money value if the stat is MONEY
+
+        ### Parameters:
+        1. stat: str
+            - The name of the stat to change
+        2. change
+            - The value to change the stat by
+        3. name: str | Char (default "")
+            - The name of the character or the character itself to change the stat for
+            - If there is no character in map with the name, -1 is returned
+            - This parameter is ignored is stat is MONEY
+        4. map: Dict[str, Char | Dict[str, Any]] (default None)
+            - The map of characters to get the character from
+            - If None and the name of the character is used instead of the Character-Object itself, -1 is returned
+            - This parameter is ignored is stat is MONEY
+        """
+
+        if stat == MONEY:
+            money.change_value(change)
+        elif stat.startswith("situation:"):
+            situation_manager.apply_progress_change(stat, change)
+        else:
+            get_school().change_stat(stat, change)
+
+    def reset_stats():
+        """
+        Resets the change of all the stats
+
+        ### Parameters:
+        1. char: str | Char (default "")
+            - The name of the character or the character itself to reset the stats for
+            - If there is no character in map with the name, -1 is returned
+            - If "", the stats for all characters in map are reset
+        2. map: Dict[str, Char | Dict[str, Any]] (default None)
+            - The map of characters to get the character from
+            - If None and the name of the character is used instead of the Character-Object itself, -1 is returned
+        """
+
+        money.reset_change()
+        
+        get_school().reset_changed_stats()
+
+    # endregion
+    ############################
+
+    #############################
+    # region Char Level Handler #
+
+    def get_level_for_char(char: Union[str, Char], map: Dict[str, Union[Char, Dict[str, Any]]] = None) -> int:
+        """
+        Returns the level of the character
+
+        ### Parameters:
+        1. char: str | Char
+            - The name of the character to get the level from
+            - If there is no character in map with the name, -1 is returned
+        2. map: Dict[str, Char | Dict[str, Any]] (default None)
+            - The map of characters to get the character from
+            - If None and the name of the character is used instead of the Character-Object itself, -1 is returned
+
+        ### Returns:
+        1. int
+            - The level of the character
+            - -1 if the character does not exist
+        """
+
+        if isinstance(char, Char):
+            return char.get_level()
+        if map != None and char in map.keys():
+            return map[char].get_level()
+        return -1
+
+    def set_level_for_char(value: int, char: Union[str, Char], map: Dict[str, Union[Char, Dict[str, Any]]] = None):
+        """
+        Sets the level of the character
+
+        ### Parameters:
+        1. value: int
+            - The value to set the level to
+        2. char: str | Char
+            - The name of the character or the character itself to set the level for
+            - If there is no character in map with the name, -1 is returned
+        3. map: Dict[str, Char | Dict[str, Any]] (default None)
+            - The map of characters to get the character from
+            - If None and the name of the character is used instead of the Character-Object itself, -1 is returned
+        """
+
+        if is_in_replay:
+            return
+
+        if isinstance(char, Char):
+            char.set_level(value)
+        elif map != None and char in map.keys():
+            map[char].set_level(value)
+
+    # endregion
+    #############################
+
+    ##############################
+    # region Char Object Handler #
+
+    def load_character(name: str, title: str, map: Dict[str, Union[Char, Dict[str, Any]]], start_data: Dict[str, Any], runtime_data: Dict[str, Any] = None):
+        """
+        Loads a character into the game
+
+        ### Parameters:
+        1. name: str
+            - The name of the character
+            - The name refers to the id representing the character. The actual name of the character is in title
+        2. title: str
+            - The title of the character
+            - The title is the actual name of the character
+        3. map: Dict[str, Char | Dict[str, Any]]
+            - The map of characters to load the character into
+        4. start_data: Dict[str, Any]
+            - The data to initialize the character with
+        5. runtime_data: Dict[str, Any] (default None)
+            - The data that can be updated after the first initialization of the character
+        """
+
+        if name not in map.keys():
+            map[name] = Char(name, title)
+            map[name].__dict__.update(start_data)
+
+        map[name]._update(runtime_data)
+
+    def update_character(char: Union[str, Char], data: Dict[str, Any], map: Dict[str, Union[Char, Dict[str, Any]]] = None):
+        """
+        Updates the character with the data
+
+        ### Parameters:
+        1. char: str | Char
+            - The name of the character or the character itself to update
+            - If there is no character in map with the name, -1 is returned
+        2. data: Dict[str, Any]
+            - The data to update the character with
+        """
+
+        if isinstance(char, Char):
+            char._update(data)
+        elif map != None and char in map.keys():
+            map[char]._update(data)
+
+    def remove_character(name: str, map: Dict[str, Union[Char, Dict[str, Any]]]):
+        """
+        Removes the character from the map
+
+        ### Parameters:
+        1. name: str
+            - The name of the character to remove
+        2. map: Dict[str, Char | Dict[str, Any]]
+            - The map of characters to remove the character from
+        """
+
+        if name in map.keys():
+            del(map[name])
+
+    # endregion
+    ##############################
+
+    ######################
+    # region Proficiency #
+
+    def exists_headmaster_proficiency(subject: str) -> bool:
+        """
+        Checks if the headmaster proficiency exists
+
+        ### Parameters:
+        1. subject: str
+            - The subject to check
+        """
+
+        return subject in headmaster_proficiencies.keys()
+
+    def set_headmaster_proficiency_level(subject: str, experience: int):
+        """
+        Sets the headmaster proficiency level
+
+        ### Parameters:
+        1. subject: str
+            - The subject to set the level for
+        2. experience: int
+            - The experience to set the level to
+        """
+
+        headmaster_proficiencies[subject] = experience
+        set_modifier("headmaster_proficiency_" + subject, Modifier_Obj("headmaster_proficiency_" + subject, "*", get_headmaster_proficiency_multiplier(subject)), stat = "all", collection = subject)
+
+    def change_headmaster_proficiency_xp(subject: str, delta: int):
+        """
+        Changes the headmaster proficiency xp
+
+        ### Parameters:
+        1. subject: str
+            - The subject to change the xp for
+        2. delta: int
+            - The value to change the xp by
+        """
+
+        if subject not in headmaster_proficiencies.keys():
+            headmaster_proficiencies[subject] = 0
+        set_headmaster_proficiency_level(subject, headmaster_proficiencies[subject] + delta)
+
+    def get_headmaster_proficiency_level(subject: str) -> int:
+        """
+        Returns the headmaster proficiency level
+
+        ### Parameters:
+        1. subject: str
+            - The subject to get the level for
+
+        ### Returns:
+        1. int
+            - The level of the headmaster proficiency
+        """
+
+        if subject not in headmaster_proficiencies.keys():
+            return 0
+        return  math.floor(headmaster_proficiencies[subject] / 100)
+
+    def get_headmaster_proficiency_levels() -> Dict[str, int]:
+        """
+        Returns the headmaster proficiency levels
+
+        ### Returns:
+        1. Dict[str, int]
+            - The dictionary of the headmaster proficiency levels
+        """
+
+        return {subject: get_headmaster_proficiency_level(subject) for subject in headmaster_proficiencies.keys()}
+
+    def get_headmaster_proficiency_xps() -> Dict[str, int]:
+        """
+        Returns the headmaster proficiency xps
+
+        ### Returns:
+        1. Dict[str, int]
+            - The dictionary of the headmaster proficiency
+        """
+
+        return {subject: get_headmaster_proficiency_xp(subject) for subject in headmaster_proficiencies.keys()}
+
+    def get_headmaster_proficiency_xp(subject: str) -> int:
+        """
+        Returns the headmaster proficiency xp
+
+        ### Parameters:
+        1. subject: str
+            - The subject to get the xp for
+
+        ### Returns:
+        1. int
+            - The xp of the headmaster proficiency
+        """
+
+        if subject not in headmaster_proficiencies.keys():
+            return 0
+        return headmaster_proficiencies[subject] % 100
+
+    def get_headmaster_proficiency_xp_until_level(subject: str) -> int:
+        """
+        Returns the headmaster proficiency xp needed until the next level
+
+        ### Parameters:
+        1. subject: str
+            - The subject to get the xp for
+
+        ### Returns:
+        1. int
+            - The xp needed until the next level
+        """
+
+        if subject not in headmaster_proficiencies.keys():
+            return -1
+        return 100 - get_headmaster_proficiency_xp(subject)
+
+    def get_headmaster_proficiency_multiplier(subject: str) -> float:
+        """
+        Returns the headmaster proficiency multiplier
+
+        ### Parameters:
+        1. subject: str
+            - The subject to get the multiplier for
+
+        ### Returns:
+        1. float
+            - The multiplier of the headmaster proficiency
+        """
+
+        if get_headmaster_proficiency_level(subject) > 0:
+            return get_headmaster_proficiency_level(subject)
+        return get_headmaster_proficiency_xp(subject) / 100
+
+    # endregion
+    ######################
+
+    #################
+    # region Person #
+
+    @deprecated(version='0.2.2', reason="Use class Person instead")
+    class PersonObj:
+        def __init__(self, name: str, first_name: str, last_name: str, char: Char, description: List[Union[str, Tuple[str, Condition]]], portraits: Dict[str, Union[str, Tuple[str, Condition]]] = {}, thumbnail = ""):
+            pass
+
+    class Person():
+        """
+        A person object that contains all the information about a person
+
+        ### Attributes:
+        1. name: str
+            - The name of the person
+        2. first_name: str
+            - The first name of the person
+        3. last_name: str
+            - The last name of the person
+        4. description: List[Union[str, Tuple[str, Condition]]]
+            - The description of the person
+        5. portraits: Dict[str, Union[str, Tuple[str, Condition]]]
+            - The portraits of the person
+        6. character: Char
+            - The character of the person
+        7. basePath: str
+            - The base path of the person
+        8. thumbnail: str
+            - The thumbnail of the person
+        9. paperdollOverrides: List[:class:`PaperdollOverride`]
+            - The paperdoll overrides of the person
+        10. paperdollPresets: List[:class:`PaperdollPreset`]
+            - Object-scoped paperdoll presets registered as `"{name}:{key}"` on `register_paperdoll`
+        11. paperdollDefaults: Dict[str, Any]
+            - Per-person paperdoll value defaults (pose, outfit, level, mood, …)
+            - Applied on `register_paperdoll` after the house defaults, before call-time kwargs
+
+        ### Parameters:
+        1. name: str
+            - The name of the person
+        2. first_name: str
+            - The first name of the person
+        3. last_name: str
+            - The last name of the person
+        4. char: Char
+            - The character of the person
+        5. description: List[Union[str, Tuple[str, Condition]]]
+            - The description of the person
+        6. portraits: Dict[str, Union[str, Tuple[str, Condition]]]
+            - The portraits of the person
+        7. paperdollOverrides: List[:class:`PaperdollOverride`]
+            - The paperdoll overrides of the person
+        8. thumbnail: str
+            - The thumbnail of the person
+        9. paperdollPresets: List[:class:`PaperdollPreset`]
+            - Character-specific paperdoll presets registered as temp `"name:key"` entries
+        10. paperdollDefaults: Dict[str, Any]
+            - Optional value defaults that replace the house paperdoll seeds for this person
+            - e.g. `{"level": 5}` when the character has no level-1 uniform
+        """
+
+        def __init__(self, name: str, first_name: str, last_name: str, char: Char, description: List[Union[str, Tuple[str, Condition]]], portraits: Dict[str, Union[str, Tuple[str, Condition]]] = {}, paperdollOverrides: List[PaperdollOverride] = [], thumbnail = "", paperdollPresets = None, paperdollDefaults = None, styleOverrides: Dict[str, Any] = None):
+            self.name = name
+            self.first_name = first_name
+            self.last_name = last_name
+            self.description = description
+            self.portraits = portraits
+            self.character = char
+            self.basePath = get_current_mod_path()
+            if thumbnail == "":
+                self.thumbnail = f"{self.basePath}images/characters/{self.name}/level_1.webp"
+            else:
+                self.thumbnail = thumbnail
+            self.paperdollOverrides = list(paperdollOverrides)
+            self.paperdollPresets = list(paperdollPresets) if paperdollPresets is not None else []
+            self.paperdollDefaults = dict(paperdollDefaults) if paperdollDefaults is not None else {}
+            # Per-character say-styling. Any Ren'Py Character kwarg (who_color, what_color,
+            # what_font, who_font, what_size, who_size, what_bold, what_italic, what_prefix,
+            # what_suffix, window_background, ...) layered on top of the category `kind` in
+            # get_renpy_char. Empty = fall back entirely to the category Character.
+            self.styleOverrides = dict(styleOverrides) if styleOverrides else {}
+
+        @classmethod
+        def __class_getitem__(cls, key):
+            """
+            Returns the person object with the given key
+
+            ### Parameters:
+            1. key: str
+                - The key of the person to get
+            """
+            return find_person(key)
+
+        def _update(self, data):
+            
+            if not hasattr(data, 'name'):
+                self.name = ""
+            if not hasattr(data, 'first_name'):
+                self.first_name = ""
+            if not hasattr(data, 'last_name'):
+                self.last_name = ""
+            if not hasattr(data, 'description'):
+                self.description = []
+            if not hasattr(data, 'portraits'):
+                self.portraits = {}
+            if not hasattr(data, 'thumbnail'):
+                self.thumbnail = ""
+            if not hasattr(data, 'paperdollOverrides'):
+                self.paperdollOverrides = []
+            if not hasattr(data, 'paperdollPresets'):
+                self.paperdollPresets = []
+            if not hasattr(data, 'paperdollDefaults'):
+                self.paperdollDefaults = {}
+            if not hasattr(data, 'styleOverrides'):
+                self.styleOverrides = {}
+
+            if data != None:
+                self.name = data.name
+                self.first_name = data.first_name
+                self.last_name = data.last_name
+                self.description = data.description
+                self.portraits = data.portraits
+                self.paperdollOverrides = data.paperdollOverrides
+                if hasattr(data, 'paperdollPresets'):
+                    self.paperdollPresets = data.paperdollPresets
+                if hasattr(data, 'paperdollDefaults'):
+                    self.paperdollDefaults = dict(data.paperdollDefaults) if data.paperdollDefaults else {}
+                if hasattr(data, 'styleOverrides'):
+                    self.styleOverrides = dict(data.styleOverrides) if data.styleOverrides else {}
+
+        def get_name(self) -> str:
+            return self.name
+
+        def get_description(self, **kwargs) -> List[str]:
+            output = []
+            for desc in self.description:
+                data = desc
+                if isinstance(desc, Tuple):
+                    if desc[1].is_fulfilled(**kwargs):
+                        continue
+                    else:
+                        data = desc[0]
+                
+                if isinstance(data, str):
+                    output.append(data)
+                elif isinstance(data, list):
+                    output.extend(data)
+                else:
+                    output.append(data)
+            return output
+
+        def get_description_str(self, **kwargs) -> str:
+            return "\n".join(self.get_description(**kwargs))
+
+        def get_portraits(self) -> Dict[str, str]:
+            output = {}
+            for level in range(1, get_school().get_level() + 1):
+                resolved = find_loadable_image(f"{self.basePath}images/characters/{self.name}/level_{level}.webp")
+                if resolved:
+                    output[f"Level {level}"] = resolved
+
+            resolved_nude = find_loadable_image(f"{self.basePath}images/characters/{self.name}/nude.webp")
+            if resolved_nude:
+                output["nude"] = resolved_nude
+
+            for portrait_key in self.portraits.keys():
+                portrait = self.portraits[portrait_key]
+                if isinstance(portrait, str):
+                    resolved = find_loadable_image(f"{self.basePath}images/characters/{self.name}/{portrait}.webp")
+                    if resolved:
+                        output[portrait_key] = resolved
+                elif portrait[1].is_fulfilled(**kwargs):
+                    if "images/" not in portrait[0]:
+                        resolved = find_loadable_image(f"{self.basePath}images/characters/{self.name}/{portrait[0]}.webp")
+                        if resolved:
+                            output[portrait_key] = resolved
+                    else:
+                        resolved = find_loadable_image(portrait[0])
+                        output[portrait_key] = resolved if resolved else portrait[0]
+
+            return output
+
+        def get_thumbnail(self) -> str:
+            resolved = find_loadable_image(self.thumbnail)
+            if not resolved:
+                return "images/journal/empty_image.webp"
+            return resolved
+
+        def get_first_name(self) -> str:
+            # The headmaster's name is player-chosen and save-specific, so it lives in
+            # gameData (via get_name), never baked into the save-agnostic Person def.
+            if self.name == "headmaster":
+                return get_name("headmaster")[0]
+
+            if self.first_name == "":
+                if self.last_name != "":
+                    return self.last_name
+                return self.name
+
+            return self.first_name
+        def get_last_name(self) -> str:
+            if self.name == "headmaster":
+                return get_name("headmaster")[1]
+
+            if self.last_name == "":
+                if self.first_name != "":
+                    return self.first_name
+                return self.name
+
+            return self.last_name
+        def get_full_name(self) -> str:
+            if self.name == "headmaster":
+                return f"{self.get_first_name()} {self.get_last_name()}"
+
+            if self.first_name == "" and self.last_name != "":
+                return self.last_name
+            if self.last_name == "" and self.first_name != "":
+                return self.first_name
+
+            return f"{self.first_name} {self.last_name}"
+
+        def set_thumbnail(self, thumbnail: str):
+            self.thumbnail = thumbnail
+
+        def __call__(self, *args, **kwargs):
+            # Lets a Person stand in for a Character as a say-statement speaker:
+            # `headmaster "..."` routes through the Person's normal (spoken) styling.
+            return self.say(*args, **kwargs)
+
+        @property
+        def say(self):
+            return self.get_renpy_char()
+
+        @property
+        def think(self):
+            return self.get_renpy_char(char_type = "thought")
+
+        @property
+        def whisper(self):
+            return self.get_renpy_char(char_type = "whisper")
+
+        @property
+        def shout(self):
+            return self.get_renpy_char(char_type = "shout")
+
+        def get_renpy_char(self, char_type: string = "") -> Character:
+
+            char_kind = character.subtitles
+
+            # The headmaster is the player: he has no stat-Char (his `.character` is
+            # None), so his styling is keyed by name rather than by linked Char.
+            if self.name == "headmaster":
+                char_kind = character.headmaster
+            elif self.character == get_character_by_key('school'):
+                char_kind = character.sgirl
+            elif self.character == get_character_by_key('parent'):
+                char_kind = character.parent
+            elif self.character == get_character_by_key('teacher'):
+                char_kind = character.teacher
+            elif self.character == get_character_by_key('secretary'):
+                char_kind = character.secretary
+
+            # Layering: category `kind` (base) ← this Person's styleOverrides ← the
+            # char_type's semantic markers (suffix/italic/bold win on their own keys).
+            kwargs = dict(getattr(self, "styleOverrides", None) or {})
+
+            if char_type == "shout":
+                kwargs.update(who_suffix = " (shouting)", what_bold = True)
+            elif char_type == "whisper":
+                kwargs.update(who_suffix = " (whispering)", what_italic = True)
+            elif char_type == "thought":
+                kwargs.update(who_suffix = " (thinking)", what_italic = True, what_prefix = "(  ", what_suffix = "  )")
+
+            return Character(self.get_full_name(), kind = char_kind, retain = False, **kwargs)
+
+        def register_paperdoll(self, *overrides: PaperdollOverride, **kwargs):
+            # House defaults ← Person.paperdollDefaults ← call-time kwargs
+            data = update_dict(
+                {"alt_keys": ["level", "mouth", "state", "char_var", "extra1", "extra2"], "mood": "neutral", "pose": 1, "outfit": "uniform", "level": 1, "mouth": "closed", "state": "", "blur": 0.0, "char_var": 1, "look": "follow", "extra1": "", "extra2": ""},
+                getattr(self, "paperdollDefaults", None) or {},
+            )
+            data = update_dict(data, kwargs)
+            global paperdoll_manager
+            log_val("register paperdoll_manager", paperdoll_manager)
+            overrides = list(overrides) + self.paperdollOverrides
+            log_val("overrides", overrides)
+            paperdoll_manager.register_obj(
+                self.name, 
+                f"{self.basePath}images/paperdoll/{self.name}/bottom/{self.name} <char_var> <pose> <outfit> <level> <state> <extra1>.png", 
+                f"{self.basePath}images/paperdoll/{self.name}/top/{self.name} <char_var> <pose> <mood> <mouth> <look> <extra2>.png", 
+                display_size = (600, 1080),
+                overrides = list(overrides) + self.paperdollOverrides,
+                presets = list(self.paperdollPresets),
+                **data
+            )
+
+        def display(self, *actions: Dict[str, Any]):
+            paperdoll_manager.display(self.name, *actions)
+
+        def clear_display(self):
+            if paperdoll_manager is not None:
+                paperdoll_manager.clear()
+
+    def find_person(name: str):
+        for key in person_storage.keys():
+            if name in person_storage[key].keys():
+
+                return person_storage[key][name]
+        return None
+
+    def get_person(key: str, name: str):
+        """
+        Returns the person object with the given key and name
+
+        ### Parameters:
+        1. key: str
+            - The key of the person
+            - Possible keys: e.g. "students", "staff", "parents"
+        2. name: str
+            - The name of the person
+
+        ### Returns:
+        1. Person
+            - The person object with the given key and name
+        """
+
+        if key not in person_storage.keys():
+            log(f"Person with key {key} not found", log_type="error", category="character")
+            return None
+        if name not in person_storage[key].keys():
+            log(f"Person with name {name} not found", log_type="error", category="character")
+            return None
+        return person_storage[key][name]
+
+    def get_person_char_with_key(key: str, name: str, char_type: string = ""):
+        """
+        Returns the character object of the person with the given key and name
+
+        ### Parameters:
+        1. key: str
+            - The key of the person
+            - Possible keys: e.g. "students", "staff", "parents"
+        2. name: str
+            - The name of the person
+
+        ### Returns:
+        1. Character
+            - The character object of the person with the given key and name
+        """
+
+        if key not in person_storage.keys():
+            log(f"Person with key {key} not found", log_type="error", category="character")
+            return None
+        if name not in person_storage[key].keys():
+            log(f"Person with name {name} not found", log_type="error", category="character")
+            return None
+        return person_storage[key][name].get_renpy_char(char_type)
+
+    def load_person(key: str, person: Person):
+        # Gated on the current mod being active (like event `add_event`): a disabled
+        # mod's persons are not registered. Base loaders set `set_current_mod('base')`,
+        # and base is always active.
+        if not is_mod_active(active_mod_key):
+            return
+
+        if key not in person_storage.keys():
+            person_storage[key] = {}
+
+        if person.name not in person_storage[key].keys() or isinstance(person_storage[key][person.name], PersonObj):
+            person_storage[key][person.name] = person
+        else:
+            person_storage[key][person.name]._update(person)
+
+    # endregion
+    #################
+
+label load_schools ():
+    # """
+    # Loads and updates all the Character-Objects for the game
+    # """
+
+    $ load_character("secretary", "Secretary", charList['staff'], {
+        'stats_objects': {
+            "corruption": Stat(CORRUPTION, 35),
+            "inhibition": Stat(INHIBITION, 50),
+            "happiness": Stat(HAPPINESS, 57),
+            "education": Stat(EDUCATION, 28),
+            "charm": Stat(CHARM, 35),
+            "reputation": Stat(REPUTATION, 79),
+        }
+    })
+
+    $ load_character("parent", "Parents", charList, {
+        'stats_objects': {
+            "corruption": Stat(CORRUPTION, 0),
+            "inhibition": Stat(INHIBITION, 100),
+            "happiness": Stat(HAPPINESS, 15),
+            "education": Stat(EDUCATION, 15),
+            "charm": Stat(CHARM, 28),
+            "reputation": Stat(REPUTATION, 38),
+        }
+    })
+
+    $ load_character("teacher", "Teacher", charList['staff'], {
+        'stats_objects': {
+            "corruption": Stat(CORRUPTION, 0),
+            "inhibition": Stat(INHIBITION, 100),
+            "happiness": Stat(HAPPINESS, 13),
+            "education": Stat(EDUCATION, 35),
+            "charm": Stat(CHARM, 14),
+            "reputation": Stat(REPUTATION, 17),
+        }
+    })
+
+    $ load_character("staff", "Staff", charList['staff'],{
+        'stats_objects': {
+            "corruption": Stat(CORRUPTION, 0),
+            "inhibition": Stat(INHIBITION, 100),
+            "happiness": Stat(HAPPINESS, 13),
+            "education": Stat(EDUCATION, 35),
+            "charm": Stat(CHARM, 14),
+            "reputation": Stat(REPUTATION, 17),
+        }
+    })
+
+    #############################################
+    # compatibility with version 0.1.2
+    # loading of school is included
+    $ fix_schools()
+
+    return
+
+label load_characters ():
+    $ set_current_mod('base')
+    $ school_char = get_character_by_key('school')
+    $ parent_char = get_character_by_key('parent')
+    $ teacher_char = get_character_by_key('teacher')
+    $ secretary_char = get_character_by_key('secretary')
+    $ staff_char = get_character_by_key('staff')
+
+    $ load_person("NoView", Person("default", "", "Person", school_char, []))
+    $ load_person("NoView", Person("default_school", "", "School Girl", school_char, []))
+    $ load_person("NoView", Person("default_parent", "", "Parent", parent_char, []))
+    $ load_person("NoView", Person("default_teacher", "", "Teacher", teacher_char, []))
+    $ load_person("NoView", Person("default_secretary", "", "Secretary", secretary_char, []))
+
+    # Name deliberately left blank: the headmaster's name is save-specific and resolved
+    # dynamically from get_name("headmaster"), so nothing name-related is baked in here.
+    $ load_person("NoView", Person("headmaster", "", "", staff_char, []))
+
+    # Example persons. Copy this pattern for your own cast.
+    # Description lines are plain strings or (lines, Condition) tuples; a tuple
+    # is shown only while its condition is fulfilled, which lets you build a
+    # tiered reveal (e.g. hide a section until an event was seen or a level reached).
+    $ load_person("students", Person("jane_doe", "Jane", "Doe", school_char, [
+            "• Height: 165 cm",
+            "An example student. Replace her with your own characters.",
+            (["", "{b}Personality{/b}", "Shown while the school is below level 3."], NOT(LevelCondition("3+"))),
+            (["", "{b}Under the surface{/b}", "Shown until the example event has been seen."], EventSeenCondition(False, "example_event")),
+        ],
+    ))
+    # Bound automatically as `secretary` in every event (see bind_event_speakers).
+    $ load_person("staff", Person("secretary", "Sam", "Taylor", secretary_char, [
+            "The headmaster's secretary. Replace with your own character.",
+        ],
+    ))
+
+    return

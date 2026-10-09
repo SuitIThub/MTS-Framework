@@ -1,0 +1,27 @@
+# Ren'Py build artifacts and runtime data
+**/*.rpyc
+**/*.rpymc
+game/cache/
+game/saves/
+log.txt
+errors.txt
+traceback.txt
+**.rpy.bak
+**.bak
+
+# Ren'Py Debug bridge (auto-injected)
+game/_renpy_debug/
+
+# Personal mods (the bundled CheatMod stays)
+game/mods/*
+!game/mods/CheatMod
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Wiki publishing clone
+wiki/.wiki-repo/
+
+.vscode/settings.json
+.env

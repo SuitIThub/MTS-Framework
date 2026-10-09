@@ -1,0 +1,4642 @@
+init python:
+    
+    situation_manager = None
+
+init -99 python:
+    from abc import ABC, abstractmethod
+
+    TEASER_NOTE_TYPES = {
+        "observation": ("Observation", "#2563eb"),
+        "suspicion": ("Suspicion", "#7c3aed"),
+        "insight": ("Insight", "#15803d"),
+        "setback": ("Setback", "#b91c1c"),
+    }
+    TEASER_TEXT_LAYOUTS = ("text_full", "text_aside")
+    TEASER_PHOTO_LAYOUTS = ("photo_left", "photo_right", "photo_top")
+    TEASER_PHOTO_W = 160
+    TEASER_PHOTO_H = 120
+
+    #########################
+    # region Helper Methods #
+
+    def parse_situation_stat_key(key: str):
+        """
+        Parse a situation progress key of the form ``situation:<situation_key>:<bar_key>``.
+
+        ``situation_key`` may itself contain colons (e.g. unlockable ``rule:level:3``).
+        The last ``:``-separated segment is always the bar key.
+
+        Args:
+            key (str): Full key, optionally without the ``situation:`` prefix
+                (``situation_key:bar_key``).
+
+        Returns:
+            tuple | None: ``(situation_key, bar_key)``, or ``None`` if the key
+            cannot be parsed.
+        """
+        if key is None or key == "":
+            return None
+
+        if key.startswith("situation:"):
+            rest = key[len("situation:"):]
+            if rest == "":
+                return None
+            if ":" not in rest:
+                return (rest, "main")
+            situation_key, bar_key = rest.rsplit(":", 1)
+            if situation_key == "" or bar_key == "":
+                return None
+            return (situation_key, bar_key)
+
+        parts = key.split(":")
+        if len(parts) == 2:
+            return (parts[0], parts[1])
+        return None
+
+    def compute_polaroid_metrics(photo_w=160, photo_h=120, rotation=0.0, xoff=0, yoff=0):
+        """
+        Layout metrics for a tilted polaroid cell.
+
+        Cell size grows with |rotation| so rotated corners, shadow, and micro-offsets
+        stay inside the reserved box (text column / row height can follow).
+
+        Returns:
+            dict: frame_w/h, cell_w/h, place_x/y, photo_w/h, rotation.
+        """
+        import math
+
+        frame_w = photo_w + 16
+        frame_h = photo_h + 36
+        shadow_w = 2
+        shadow_h = 3
+        # Tape sits on the top edge; keep a little slack above the frame.
+        tape_slack = 6
+
+        rad = math.radians(abs(float(rotation or 0.0)))
+        bb_w = frame_w * math.cos(rad) + frame_h * math.sin(rad)
+        bb_h = frame_w * math.sin(rad) + frame_h * math.cos(rad)
+
+        cell_w = int(math.ceil(bb_w + shadow_w + 2 * abs(int(xoff or 0)) + 2))
+        cell_h = int(math.ceil(bb_h + shadow_h + tape_slack + 2 * abs(int(yoff or 0)) + 2))
+        place_x = (cell_w - frame_w) // 2 + int(xoff or 0)
+        place_y = (cell_h - frame_h) // 2 + int(yoff or 0)
+
+        return {
+            "photo_w": photo_w,
+            "photo_h": photo_h,
+            "frame_w": frame_w,
+            "frame_h": frame_h,
+            "cell_w": cell_w,
+            "cell_h": cell_h,
+            "place_x": place_x,
+            "place_y": place_y,
+            "rotation": float(rotation or 0.0),
+        }
+    
+    def get_bar_value_mood(area: int, min: int = None, max: int = None) -> str:
+        """
+        Short English mood keyword for a bar area.
+
+        On two-sided bars (``min < 0 < max``), area ``0`` is ``neutral``.
+        On one-sided bars (range does not cross zero), area ``0`` is the end
+        nearest zero — the floor of the available range, not a midpoint — so
+        it maps to ``minimal`` instead of ``neutral``.
+        """
+        one_sided = min is not None and max is not None and (max < 0 or min > 0)
+        moods = {
+            -3: "hostile",
+            -2: "tense",
+            -1: "uneasy",
+            0: "minimal" if one_sided else "neutral",
+            1: "open",
+            2: "relaxed",
+            3: "enthusiastic",
+        }
+        return moods.get(area, "neutral")
+
+    def get_bar_value_area(min: int, max: int, value: int) -> int:
+        """
+        Map a bar value to area ``-3 … 0 … 3``.
+
+        Each side of zero is split into **7** equal parts:
+        - the seventh nearest to 0 → area ``0``
+        - the remaining six sevenths form three pairs → ``±1``, ``±2``, ``±3``
+            (closer pair = smaller magnitude)
+
+        Entirely positive or entirely negative bars use the same 7-way split
+        over ``[min, max]``, with the end nearer to zero treated as area ``0``.
+        """
+        if min > max:
+            return 0
+
+        def map_seventh(index: int, negative: bool) -> int:
+            # index 0 = nearest zero → 0; 1–2 → ±1; 3–4 → ±2; 5–6 → ±3
+            if index <= 0:
+                return 0
+            level = (index + 1) // 2
+            if level > 3:
+                level = 3
+            return -level if negative else level
+
+        def seventh_index(lo: float, hi: float, v: float, from_near_zero: bool) -> int:
+            """Return 0..6; index 0 is the end nearer to zero."""
+            span = hi - lo
+            if span <= 0:
+                return 0
+            if v < lo:
+                v = lo
+            elif v > hi:
+                v = hi
+            t = (v - lo) / float(span)
+            raw = t if from_near_zero else (1.0 - t)
+            idx = int(raw * 7)
+            if idx >= 7:
+                idx = 6
+            elif idx < 0:
+                idx = 0
+            return idx
+
+        # Entirely negative: near-zero end is max
+        if max < 0:
+            return map_seventh(
+                seventh_index(min, max, value, from_near_zero=False),
+                negative=True,
+            )
+
+        # Entirely positive: near-zero end is min
+        if min > 0:
+            return map_seventh(
+                seventh_index(min, max, value, from_near_zero=True),
+                negative=False,
+            )
+
+        if value == 0:
+            return 0
+
+        if value > 0:
+            return map_seventh(
+                seventh_index(0, max, value, from_near_zero=True),
+                negative=False,
+            )
+
+        return map_seventh(
+            seventh_index(min, 0, value, from_near_zero=False),
+            negative=True,
+        )
+
+    #endregion
+    #########################
+
+    ##########################
+    # region SituationTeaser #
+
+    class SituationTeaser:
+        """
+        Chronicle note / pre-activation teaser for a situation.
+
+        Definition fields (hot-reloadable): teaser text, conditions, optional
+        interpretation, note_type, image pattern, layout. Runtime fields freeze on
+        activate (timestamp, layout_id, resolved image, interpolated texts).
+        """
+
+        def __init__(
+            self,
+            key: str,
+            teaser: str,
+            *conditions: Condition,
+            interpretation: str = None,
+            note_type: str = None,
+            image: str = None,
+            layout: str = None,
+        ):
+            self.key = key
+            self.teaser = teaser
+            self.conditions = ConditionStorage(*conditions)
+            self.interpretation = interpretation
+            self.note_type = note_type
+            # Redirect the path into the current mod's folder (base = "" prefix).
+            self.image = get_mod_path(active_mod_key) + image if image else image
+            # Optional forced journal layout id; None → random on activate.
+            self.layout = layout
+
+            self.active = False
+            self.values = {}
+            self.text = self.teaser
+            self.interpretation_text = None
+            self.activation_order = -1
+            self.activated_time = None
+            self.image_path = None
+            self.layout_id = None
+            self.layout_rotation = 0.0
+            self.layout_offset_x = 0
+            self.layout_offset_y = 0
+
+            self.situation = None
+        
+        def update_data(self, teaser: SituationTeaser):
+            self.key = teaser.key
+            self.teaser = teaser.teaser
+            self.conditions = teaser.conditions
+            self.interpretation = teaser.interpretation
+            self.note_type = teaser.note_type
+            self.image = teaser.image
+            self.layout = teaser.layout
+            if not hasattr(self, 'activation_order'):
+                self.activation_order = -1
+            if not hasattr(self, 'interpretation'):
+                self.interpretation = None
+            if not hasattr(self, 'note_type'):
+                self.note_type = None
+            if not hasattr(self, 'image'):
+                self.image = None
+            if not hasattr(self, 'layout'):
+                self.layout = None
+            if not hasattr(self, 'activated_time'):
+                self.activated_time = None
+            if not hasattr(self, 'image_path'):
+                self.image_path = None
+            if not hasattr(self, 'layout_id'):
+                self.layout_id = None
+            if not hasattr(self, 'layout_rotation'):
+                self.layout_rotation = 0.0
+            if not hasattr(self, 'layout_offset_x'):
+                self.layout_offset_x = 0
+            if not hasattr(self, 'layout_offset_y'):
+                self.layout_offset_y = 0
+            if not hasattr(self, 'interpretation_text'):
+                self.interpretation_text = None
+            if self.active:
+                self.text = interpolate_string(self.teaser, **self.values)
+                if self.interpretation:
+                    self.interpretation_text = interpolate_string(self.interpretation, **self.values)
+                # Migrate older saves that lack chronicle freeze fields
+                if getattr(self, "layout_id", None) is None:
+                    self._resolve_image()
+                    self._pick_layout()
+                if getattr(self, "interpretation_text", None) is None and self.interpretation:
+                    self.interpretation_text = interpolate_string(self.interpretation, **self.values)
+            return self
+
+        def __str__(self):
+            return "situation_teaser:" + self.situation.key + ":" + self.key
+
+        def run_self_test(self):
+            error_messages = []
+            if len(self.conditions) == 0:
+                error_messages.append((700, "No conditions provided."))
+            if self.note_type is not None and self.note_type not in TEASER_NOTE_TYPES:
+                error_messages.append((701, f"note_type '{self.note_type}' is invalid."))
+            valid_layouts = TEASER_TEXT_LAYOUTS + TEASER_PHOTO_LAYOUTS
+            if self.layout is not None and self.layout not in valid_layouts:
+                error_messages.append((702, f"layout '{self.layout}' is invalid."))
+            if self.layout in TEASER_PHOTO_LAYOUTS and not self.image:
+                error_messages.append((703, f"layout '{self.layout}' requires an image."))
+            return error_messages
+
+        def check_conditions(self, **kwargs):
+            return self.conditions.is_fulfilled(**kwargs)
+
+        def has_photo(self) -> bool:
+            return self.image_path is not None and self.image_path != ""
+
+        def get_polaroid_metrics(self, photo_w: int = None, photo_h: int = None):
+            """
+            Rotation-aware polaroid cell metrics for journal layout.
+
+            Args:
+                photo_w: Inner photo width. Defaults to TEASER_PHOTO_W.
+                photo_h: Inner photo height. Defaults to TEASER_PHOTO_H.
+
+            Returns:
+                dict: See compute_polaroid_metrics.
+            """
+            if photo_w is None:
+                photo_w = TEASER_PHOTO_W
+            if photo_h is None:
+                photo_h = TEASER_PHOTO_H
+            return compute_polaroid_metrics(
+                photo_w,
+                photo_h,
+                rotation=getattr(self, "layout_rotation", 0.0),
+                xoff=getattr(self, "layout_offset_x", 0),
+                yoff=getattr(self, "layout_offset_y", 0),
+            )
+
+        def get_timestamp_text(self) -> str:
+            """Frozen in-game timestamp label, or empty if not activated."""
+            if self.activated_time is None:
+                return ""
+            day = self.activated_time.get_day()
+            month = self.activated_time.get_month_name()
+            daytime = self.activated_time.get_daytime_name()
+            return f"Day {day} {month}, {daytime}"
+
+        def get_note_type_display(self):
+            """
+            Returns:
+                tuple: (label, color) or (None, None) when unset.
+            """
+            if self.note_type is None:
+                return None, None
+            return TEASER_NOTE_TYPES.get(self.note_type, (self.note_type, "#444444"))
+
+        def _collect_interpolation_values(self, template: str, **kwargs):
+            if not template:
+                return
+            for key in get_interpolation_keys(template):
+                if key in kwargs:
+                    self.values[key] = kwargs[key]
+
+        def _resolve_image(self, **kwargs):
+            self.image_path = None
+            if not self.image:
+                return
+            merge = dict(kwargs)
+            merge.update(self.values)
+            nude, path = get_image(self.image, **merge)
+            if nude < 0 or not path:
+                return
+            probe = path.replace("<nude>", "0") if "<nude>" in path else path
+            resolved = find_loadable_image(probe)
+            if resolved:
+                self.image_path = resolved
+
+        def _pick_layout(self):
+            """
+            Freeze layout_id + micro tilt/offset. Uses definition `layout` when set;
+            otherwise picks randomly (anti-repeat) from the matching pool.
+            """
+            forced = getattr(self, "layout", None)
+            if forced in TEASER_PHOTO_LAYOUTS and not self.has_photo():
+                forced = None
+            if forced in TEASER_TEXT_LAYOUTS + TEASER_PHOTO_LAYOUTS:
+                self.layout_id = forced
+            else:
+                pool = list(TEASER_PHOTO_LAYOUTS if self.has_photo() else TEASER_TEXT_LAYOUTS)
+                prev_layout = None
+                if self.situation is not None:
+                    previous = [
+                        teaser for teaser in self.situation.teasers.values()
+                        if teaser is not self and teaser.active and teaser.layout_id
+                    ]
+                    if previous:
+                        previous.sort(key=lambda t: t.activation_order)
+                        prev_layout = previous[-1].layout_id
+                if prev_layout in pool and len(pool) > 1:
+                    pool.remove(prev_layout)
+                self.layout_id = pool[get_random_int(0, len(pool) - 1)]
+
+            self.layout_rotation = round((renpy.random.random() * 8.0) - 4.0, 2)
+            self.layout_offset_x = get_random_int(-6, 6)
+            self.layout_offset_y = get_random_int(-4, 4)
+
+        def activate(self, **kwargs):
+            """
+            Unlock this note once. Freezes timestamp, layout, and interpolated texts.
+            Re-entry is a no-op (ink is dry).
+            """
+            if self.active:
+                return self
+
+            self.active = True
+            if self.situation is not None:
+                order = 0
+                for teaser in self.situation.teasers.values():
+                    if teaser is not self and teaser.active:
+                        order += 1
+                self.activation_order = order
+
+            self.activated_time = Time("now")
+            self._collect_interpolation_values(self.teaser, **kwargs)
+            self._collect_interpolation_values(self.interpretation, **kwargs)
+            self.text = interpolate_string(self.teaser, **self.values)
+            if self.interpretation:
+                self.interpretation_text = interpolate_string(self.interpretation, **self.values)
+            else:
+                self.interpretation_text = None
+
+            self._resolve_image(**kwargs)
+            self._pick_layout()
+            notify_situation_journal_alert(self.situation)
+            return self
+
+    #endregion
+    ##########################
+
+    #############################
+    # region SituationThreshold #
+
+    class SituationThreshold:
+        def __init__(self, approach_hint: str, threshold_hint: str, *elements: Condition | Effect, direction: int = 1, visible_range: int = 100, thumbnail: str = None, default_hold: int = 5):
+            self.bounds = {}
+            self.approach_hint = approach_hint
+            self.threshold_hint = threshold_hint
+            self.direction = direction
+            self.blocking = ConditionStorage()
+            self.effects = []
+            self.reached = False
+            # Redirect the path into the current mod's folder (base = "" prefix).
+            self.thumbnail = get_mod_path(active_mod_key) + thumbnail if thumbnail else thumbnail
+            self.visible_range = visible_range
+            self.situation = None
+            self.timed_release = None
+            self.default_hold = default_hold
+            self.hold = -1
+
+            for element in elements:
+                if isinstance(element, Condition):
+                    if isinstance(element, TimerCondition):
+                        self.timed_release = element
+                        continue
+                    self.add_blocking(element)
+                elif isinstance(element, Effect):
+                    self.add_effect(element)
+
+        @property
+        def key(self):
+            bounds = ",".join(f"{k}:{self.bounds[k]}" for k in sorted(self.bounds.keys()))
+            if self.situation is None:
+                return bounds
+            return "situation:" + self.situation.key + ":" + bounds
+
+        def update_data(self, threshold: SituationThreshold):
+            self.bounds = dict(threshold.bounds)
+            self.approach_hint = threshold.approach_hint
+            self.threshold_hint = threshold.threshold_hint
+            self.direction = threshold.direction
+            self.blocking = threshold.blocking
+            self.effects = threshold.effects
+            self.visible_range = threshold.visible_range
+            self.thumbnail = threshold.thumbnail
+            self.default_hold = threshold.default_hold
+            if not hasattr(self, 'hold'):
+                self.hold = -1
+
+            return self
+
+        def run_self_test(self):
+            error_messages = []
+            if self.timed_release is not None and len(self.blocking) == 0:
+                error_messages.append((710, "Timed release condition without blocking conditions"))
+
+            for bar_keys in self.bounds.keys():
+                if bar_keys not in self.situation.bars.keys():
+                    error_messages.append((711, f"Bar {bar_keys} not found."))
+                else:
+                    if self.situation.bars[bar_keys].min > self.bounds[bar_keys]:
+                        error_messages.append((712, f"Bar {bar_keys} min is less than bound {self.bounds[bar_keys]}."))
+                    if self.situation.bars[bar_keys].max < self.bounds[bar_keys]:
+                        error_messages.append((713, f"Bar {bar_keys} max is greater than bound {self.bounds[bar_keys]}."))
+
+            if self.direction not in [1, -1]:
+                error_messages.append((714, "Direction is 0. Has to be 1 or -1."))
+
+            if self.default_hold < -1:
+                error_messages.append((715, "Default hold is less than -1. Has to be -1 (no hysteresis) or 0 or greater."))
+
+            if self.visible_range < 0:
+                error_messages.append((716, "Visible range is less than 0. Has to be 0 or greater."))
+
+            if len(self.bounds) == 0:
+                error_messages.append((717, "No bounds provided."))
+
+            if self.is_blocking() != (self.threshold_hint is not None and self.threshold_hint != ""):
+                error_messages.append(
+                    (718, "Mismatch: Blocking threshold must have at least one blocking Condition and a threshold_hint, or neither (for Auto threshold).")
+                )
+
+            if self.approach_hint == "":
+                error_messages.append((719, "Approach hint is empty. Has to be a non-empty string."))
+
+            return error_messages
+
+        def add_blocking(self, *blocking: Condition):
+            for condition in blocking:
+                if isinstance(condition, TimerCondition):
+                    self.timed_release = condition
+                    continue
+                self.blocking.add_conditions(condition)
+            return self
+
+        def set_visible_range(self, visible_range: int):
+            self.visible_range = visible_range
+            return self
+
+        def set_hold(self, hold: int = -1):
+            """
+            Enter hysteresis hold, or permanently clear when hold is disabled.
+
+            ``hold == -1`` means ``use default_hold``. If the effective value is
+            ``-1``, the threshold is marked ``reached`` and never re-arms
+            (no hysteresis). Otherwise the bar must leave the bound by that
+            many points before the threshold can trigger again.
+
+            Args:
+                hold (int): Hold distance, or ``-1`` to use ``default_hold``.
+
+            Returns:
+                SituationThreshold: self
+            """
+            effective = self.default_hold if hold == -1 else hold
+            if effective < 0:
+                self.reached = True
+                self.hold = -1
+                if self.situation is not None and self.key in getattr(self.situation, "threshold_holds", {}):
+                    self.situation.release_threshold_hold(self.key)
+                return self
+
+            self.hold = effective
+            self.situation.add_threshold_hold(self, self.hold)
+            return self
+
+        def release_hold(self):
+            self.hold = -1
+            self.situation.release_threshold_hold(self.key)
+            return self
+
+        def is_bar_values_reached(self):
+            for key in self.bounds.keys():
+                bar_value = self.situation.bars[key].value
+                if (self.direction > 0 and bar_value < self.bounds[key]) or (self.direction < 0 and bar_value > self.bounds[key]):
+                    return False
+            return True
+
+        def add_bounds(self, **bounds):
+            for key, value in bounds.items():
+                self.bounds[key] = value
+            return self
+
+        def trigger_threshold(self):
+            if self.reached or self.hold != -1:
+                return
+            if self.situation is None or not self.situation.is_running():
+                return
+
+            if len(self.blocking) > 0 or self.timed_release is not None:
+                situation_manager.add_threshold_check(self)
+                if self.timed_release is not None:
+                    self.timed_release.id = self.key
+                    set_timer(self.key, "now")
+            else:
+                # Auto threshold: route through set_hold so default_hold governs
+                # re-arming, then fire. default_hold == -1 latches reached (old behavior);
+                # default_hold >= 0 opens a hysteresis zone and stays re-armable.
+                # State is updated before the effects so nothing is lost if an effect jumps.
+                self.set_hold()
+                self.trigger_effects()
+            return
+
+        def add_effect(self, *effects: Effect):
+            self.effects.extend(effects)
+            return self
+
+        def trigger_effects(self):
+            # Event effects are queued and run by drain_situation_events.
+            begin_situation_event_deferral()
+            try:
+                for effect in self.effects:
+                    effect.apply()
+            finally:
+                end_situation_event_deferral()
+
+        def load_thumbnail(self, **kwargs):
+            if not self.thumbnail:
+                return None
+            refined_thumbnail = refine_image(self.thumbnail, **kwargs)
+            if refined_thumbnail is not None:
+                return refined_thumbnail
+            return None
+
+        def is_blocking(self):
+            return len(self.blocking.get_conditions()) > 0
+
+        def is_reached(self) -> bool:
+            return self.reached
+
+    # endregion
+    #############################
+
+    ############################
+    # region SituationPassives #
+
+    class SituationPassive(ABC):
+        def __init__(self, name: str, description: str, *effects):
+            self.name = name
+            self.description = description
+            self.effects = {}
+            self.situation = None
+            self._pending_effects = list(effects)
+            self.active = False
+
+        @property
+        def type(self) -> str:
+            return "passive"
+
+        def run_self_test(self):
+            error_messages = []
+            if len(self.effects) == 0:
+                error_messages.append((720, "No effects provided."))
+            for effect in self.effects.values():
+                error_messages.extend(effect.run_self_test())
+                if isinstance(effect, UnlockableScheduleVoteEffect):
+                    error_messages.append((721, "UnlockableScheduleVoteEffect is not allowed in a passive. Use a measure instead."))
+            return error_messages
+
+        def update_data(self, passive: SituationPassive):
+            """
+            Sync description and effects from a template passive.
+
+            Args:
+                passive (SituationPassive): Template passive from a fresh load.
+
+            Returns:
+                SituationPassive: self
+            """
+            self.description = passive.description
+            self._sync_effects(passive)
+            return self
+
+        def _sync_effects(self, template: SituationPassive):
+            """
+            Sync effect definitions by local_key. Does not apply/revert modifiers.
+
+            Args:
+                template (SituationPassive): Template passive with bound effects.
+            """
+            template_effects = {effect.local_key: effect for effect in template._iter_effects()}
+
+            for local_key, template_effect in template_effects.items():
+                if local_key in self.effects:
+                    self.effects[local_key].update_data(template_effect)
+                    self.effects[local_key].passive = self
+                else:
+                    clone = template_effect.clone()
+                    clone.passive = self
+                    self.effects[local_key] = clone
+
+            for local_key in list(self.effects.keys()):
+                if local_key not in template_effects:
+                    del self.effects[local_key]
+
+        def _iter_effects(self):
+            if self.effects:
+                return list(self.effects.values())
+            return list(self._pending_effects)
+
+        def bind_situation(self, situation):
+            """
+            Attach to a situation and index pending effects by local_key.
+
+            Args:
+                situation (Situation): Parent situation.
+
+            Returns:
+                SituationPassive: self
+            """
+            self.situation = situation
+            for effect in self._pending_effects:
+                if not isinstance(effect, SituationEffect):
+                    continue
+                effect.passive = self
+                self.effects[effect.local_key] = effect
+            self._pending_effects = []
+            for effect in self.effects.values():
+                effect.passive = self
+            return self
+
+        def check(self, **kwargs):
+            pass
+
+        def activate(self):
+            self.active = True
+            # EventEffects are queued (renpy.call would abort the caller, e.g.
+            # SituationMeasure.activate before it frees the slot). The journal's
+            # activate_* labels drain the queue afterwards.
+            begin_situation_event_deferral()
+            try:
+                self.run_effects()
+            finally:
+                end_situation_event_deferral()
+
+        def deactivate(self):
+            self.active = False
+            self.revert_effects()
+
+        def get_effects_description(self, in_rows: bool = False):
+            if in_rows:
+                rows = []
+                for effect in self.effects.values():
+                    rows.extend(effect.descriptions)
+                return rows
+            return ", ".join(effect.description for effect in self.effects.values())
+
+        def get_description(self):
+            return self.description
+
+        def get_full_description(self):
+            return self.description, self.get_effects_description(True)
+
+        def add_effect(self, *effects):
+            for effect in effects:
+                if not isinstance(effect, SituationEffect):
+                    continue
+                effect.passive = self
+                if self.situation is not None:
+                    self.effects[effect.local_key] = effect
+                else:
+                    self._pending_effects.append(effect)
+            return self
+
+        def run_effects(self):
+            for effect in self.effects.values():
+                effect.apply()
+
+        def revert_effects(self):
+            for effect in self.effects.values():
+                effect.revert()
+
+        def detach_effects(self):
+            """Clear local ModifierEffect handles without touching the registry."""
+            for effect in self.effects.values():
+                effect.detach()
+
+        def check_available(self, **kwargs):
+            return True
+
+    class SituationMeasure(SituationPassive):
+        def __init__(
+            self,
+            name: str,
+            description: str,
+            duration: TimerCondition,
+            conditions: List[Condition],
+            instant_effects: List[SituationEffect],
+            permanent_effects: List[SituationEffect],
+            open_ended: bool = False,
+        ):
+            super().__init__(name, description, *permanent_effects)
+            self.conditions = ConditionStorage()
+            self.cooldown = None
+            self.counter = None
+
+            for condition in conditions:
+                if isinstance(condition, TimerCondition):
+                    self.cooldown = condition
+                elif isinstance(condition, ManualCounterCondition) or isinstance(condition, CounterCondition) or isinstance(condition, LatchCounterCondition):
+                    self.counter = condition
+                else:
+                    self.conditions.add_conditions(condition)
+
+            self.instant_effects = instant_effects
+            self.permanent_effects = permanent_effects
+            self.duration = duration
+            # True: duration=None holds the slot until something else deactivates
+            # (Unlockable Schedule Vote). False: duration=None is instant — apply then close.
+            self.open_ended = open_ended
+
+        @property
+        def type(self) -> str:
+            return "measure"
+
+        def get_effects_description(self, in_rows: bool = False):
+            """
+            Include instant (now) and lasting (while active) effect descriptions.
+
+            Args:
+                in_rows (bool): If True, return a list; otherwise a comma-joined string.
+
+            Returns:
+                list|str: Effect descriptions for journal display.
+            """
+            descs = []
+            for effect in self.instant_effects:
+                if isinstance(effect, SituationEffect):
+                    for line in effect.descriptions:
+                        descs.append(f"Now: {line}")
+            for effect in self.effects.values():
+                for line in effect.descriptions:
+                    descs.append(f"While active: {line}")
+            if in_rows:
+                return descs
+            return ", ".join(descs)
+
+        def check_available(self, **kwargs):
+            if self.situation is not None and self.situation.is_paused():
+                return False
+            if self.situation is not None and self.situation.active_measure is not None:
+                return False
+            if self.counter is not None:
+                kwargs[self.counter.counter_key] = self.active
+            if not super().check_available(**kwargs):
+                return False
+            if not self.conditions.is_fulfilled(**kwargs):
+                return False
+            if self.cooldown is not None and get_timer(self.cooldown.id) is not None and not self.cooldown.is_fulfilled(**kwargs):
+                return False
+            if self.counter is not None and not self.counter.is_fulfilled(**kwargs):
+                return False
+            return True
+
+        def update_data(self, passive: SituationPassive):
+            super().update_data(passive)
+            if isinstance(passive, SituationMeasure):
+                self.duration = passive.duration
+                self.open_ended = getattr(passive, "open_ended", False)
+            elif not hasattr(self, "open_ended"):
+                self.open_ended = False
+            return self
+
+        def check(self, **kwargs):
+            if self.duration is not None and self.duration.is_fulfilled(**kwargs):
+                self.deactivate()
+
+        def activate(self):
+            super().activate()
+            if self.duration is not None:
+                set_timer(self.duration.id, "now")
+            if self.cooldown is not None:
+                remove_timer(self.cooldown.id)
+            if self.counter is not None and isinstance(self.counter, ManualCounterCondition):
+                self.counter.increase()
+            begin_situation_event_deferral()
+            try:
+                for effect in self.instant_effects:
+                    if isinstance(effect, SituationEffect):
+                        effect.passive = self
+                        effect.apply(conditions = self.conditions)
+            finally:
+                end_situation_event_deferral()
+            # Instant: no duration and not an open-ended hold (e.g. Schedule Vote).
+            if self.duration is None and not getattr(self, "open_ended", False):
+                self.deactivate()
+
+        def deactivate(self):
+            super().deactivate()
+            if self.duration is not None:
+                remove_timer(self.duration.id)
+            
+            if self.cooldown is not None:
+                set_timer(self.cooldown.id, "now")
+
+            if self.situation is not None and self.situation.active_measure == self.name:
+                self.situation.active_measure = None
+
+        def bind_situation(self, situation):
+            super().bind_situation(situation)
+            for effect in self.instant_effects:
+                if isinstance(effect, SituationEffect):
+                    effect.passive = self
+            return self
+
+        def run_self_test(self):
+            error_messages = []
+            if len(self.effects) == 0 and len(self.instant_effects) == 0:
+                error_messages.append((720, "No effects provided."))
+            for effect in self.effects.values():
+                error_messages.extend(effect.run_self_test())
+            for effect in self.instant_effects:
+                if isinstance(effect, SituationEffect):
+                    error_messages.extend(effect.run_self_test())
+            return error_messages
+
+        def clone(self) -> SituationMeasure:
+            conditions = self.conditions.get_conditions()
+            if self.cooldown is not None:
+                conditions.append(self.cooldown)
+            if self.counter is not None:
+                conditions.append(self.counter)
+            return SituationMeasure(
+                self.name,
+                self.description,
+                self.duration,
+                conditions,
+                list(self.instant_effects),
+                list(self.permanent_effects),
+                open_ended=getattr(self, "open_ended", False),
+            )
+
+    class SituationEffect(ABC):
+        def __init__(self):
+            self.passive = None
+            self.effect = None
+
+        @property
+        @abstractmethod
+        def local_key(self) -> str:
+            """Stable identity within a passive (no situation prefix)."""
+            pass
+
+        @property
+        def key(self) -> str:
+            return (
+                self.passive.situation.key
+                + ":passive:"
+                + self.passive.name
+                + ":effect:"
+                + self.local_key
+            )
+
+        @property
+        @abstractmethod
+        def description(self) -> str:
+            pass
+
+        @property
+        def descriptions(self) -> list:
+            """
+            Description lines for the row (detail) display.
+
+            Defaults to the single ``description``. Effects that carry several lines
+            (e.g. ``SituationEffectGeneral``) override this so each line renders on
+            its own row while ``description`` stays the comma-joined summary.
+            """
+            return [self.description]
+
+        @abstractmethod
+        def run_self_test(self):
+            pass
+
+        @abstractmethod
+        def clone(self) -> SituationEffect:
+            """Return a new unbound instance with the same definition."""
+            pass
+
+        @abstractmethod
+        def update_data(self, other: SituationEffect):
+            """Copy definition fields from another effect of the same type."""
+            pass
+
+        @abstractmethod
+        def apply(self, **kwargs):
+            pass
+
+        @abstractmethod
+        def revert(self):
+            pass
+
+        def detach(self):
+            self.effect = None
+
+    class SituationEffectSetGameData(SituationEffect):
+        def __init__(self, data_key: str, value: float, description: str):
+            super().__init__()
+            self.data_key = data_key
+            self.value = value
+            self._description = description
+            self._previous_value = None
+            self._applied = False
+
+        @property
+        def local_key(self) -> str:
+            return self.data_key
+
+        @property
+        def description(self) -> str:
+            return self._description
+
+        def clone(self) -> SituationEffectSetGameData:
+            return SituationEffectSetGameData(self.data_key, self.value, self._description)
+
+        def update_data(self, other: SituationEffect):
+            if not isinstance(other, SituationEffectSetGameData):
+                return
+            self.data_key = other.data_key
+            self.value = other.value
+            self._description = other._description
+
+        def run_self_test(self):
+            error_messages = []
+            if not isinstance(self.data_key, str) or self.data_key == "":
+                error_messages.append((730, f"Game data key {self.data_key} is invalid."))
+            if not isinstance(self.value, (int, float)):
+                error_messages.append((731, f"Value {self.value} is not a float."))
+            return error_messages
+
+        def apply(self, **kwargs):
+            self._previous_value = get_game_data(self.data_key)
+            set_game_data(self.data_key, self.value)
+            self._applied = True
+            return self
+
+        def revert(self, **kwargs):
+            if not self._applied:
+                return self
+            if self._previous_value is None:
+                remove_game_data(self.data_key)
+            else:
+                set_game_data(self.data_key, self._previous_value)
+            self._previous_value = None
+            self._applied = False
+            return self
+
+    class SituationEffectStatChangeModifier(SituationEffect):
+        def __init__(self, stat: str, value: float, operation: str):
+            super().__init__()
+            self.stat = stat
+            self.value = value
+            self.operation = operation
+
+        @property
+        def local_key(self) -> str:
+            return self.stat + "_" + self.operation
+
+        @property
+        def description(self) -> str:
+            stat_name = Stat_Data[self.stat].get_title()
+            operation_name = self.operation
+            if operation_name == "+" and self.value < 0:
+                return f"{stat_name}: -{self.value}"
+            elif operation_name == "+":
+                return f"{stat_name}: +{self.value}"
+            elif operation_name == "*":
+                return f"{stat_name}: *{self.value}"
+            elif operation_name == "value_percent" and self.value > 0:
+                return f"{stat_name}: +{self.value}% of the value"
+            elif operation_name == "value_percent" and self.value < 0:
+                return f"{stat_name}: -{self.value}% of the value"
+            elif operation_name == "range_percent" and self.value > 0:
+                return f"{stat_name}: +{self.value}% of the range"
+            elif operation_name == "range_percent" and self.value < 0:
+                return f"{stat_name}: -{self.value}% of the range"
+            elif operation_name == "gated_percent" and self.value > 0:
+                return f"{stat_name}: +{self.value}% of the gated range"
+            elif operation_name == "gated_percent" and self.value < 0:
+                return f"{stat_name}: -{self.value}% of the gated range"
+            return f"{stat_name}: {operation_name} {self.value}"
+
+        def clone(self) -> SituationEffectStatChangeModifier:
+            return SituationEffectStatChangeModifier(self.stat, self.value, self.operation)
+
+        def update_data(self, other: SituationEffect):
+            if not isinstance(other, SituationEffectStatChangeModifier):
+                return
+            self.stat = other.stat
+            self.value = other.value
+            self.operation = other.operation
+
+        def run_self_test(self):
+            error_messages = []
+            if Stat_Data[self.stat] == None:
+                error_messages.append((740, f"Stat {self.stat} not found."))
+            if not isinstance(self.value, (int, float)):
+                error_messages.append((741, f"Value {self.value} is not a float."))
+            if self.operation not in ["+", "*", "%", "value_percent", "range_percent", "gated_percent"]:
+                error_messages.append((742, f"Operation {self.operation} is invalid. Has to be +, *, value_percent, range_percent or gated_percent."))
+            return error_messages
+
+        def apply(self, **kwargs):
+            situation = self.passive.situation
+            mod_key = self.key
+            self.effect = ModifierEffect(
+                mod_key,
+                self.stat,
+                Modifier_Obj(mod_key, self.operation, self.value),
+                "default",
+            )
+            self.effect.apply(**kwargs)
+            situation.track_modifier(
+                mod_key, self.stat, "default", self.operation, self.value
+            )
+            return self
+
+        def revert(self, **kwargs):
+            mod_key = self.key
+            if self.effect is not None:
+                self.effect.revert(**kwargs)
+                self.effect = None
+            # Modifier already removed by ModifierEffect.revert — drop lifecycle entry
+            lifecycle_registry.ping(mod_key, REMOVE)
+            return self
+
+    class SituationEffectBarChangeModifier(SituationEffect):
+        def __init__(self, bar_key: str, value: float, operation: str, interval: str):
+            super().__init__()
+            self.bar_key = bar_key
+            self.value = value
+            self.operation = operation
+            self.interval = interval
+
+        @property
+        def local_key(self) -> str:
+            return self.bar_key + "_" + self.operation + "_" + self.interval
+
+        @property
+        def description(self) -> str:
+            operation_name = self.operation
+            if operation_name == "+" and self.value < 0:
+                return f"Bar: -{self.value}/{self.interval}"
+            elif operation_name == "+":
+                return f"Bar: +{self.value}/{self.interval}"
+            elif operation_name == "*":
+                return f"Bar: *{self.value}/{self.interval}"
+            elif operation_name == "value_percent" and self.value > 0:
+                return f"Bar: +{self.value}%/{self.interval} of the value"
+            elif operation_name == "value_percent" and self.value < 0:
+                return f"Bar: -{self.value}%/{self.interval} of the value"
+            elif operation_name == "range_percent" and self.value > 0:
+                return f"Bar: +{self.value}%/{self.interval} of the range"
+            elif operation_name == "range_percent" and self.value < 0:
+                return f"Bar: -{self.value}%/{self.interval} of the range"
+            elif operation_name == "gated_percent" and self.value > 0:
+                return f"Bar: +{self.value}%/{self.interval} of the gated range"
+            elif operation_name == "gated_percent" and self.value < 0:
+                return f"Bar: -{self.value}%/{self.interval} of the gated range"
+            return f"Bar: {operation_name} {self.value}/{self.interval}"
+
+        def clone(self) -> SituationEffectBarChangeModifier:
+            return SituationEffectBarChangeModifier(self.bar_key, self.value, self.operation, self.interval)
+
+        def update_data(self, other: SituationEffect):
+            if not isinstance(other, SituationEffectBarChangeModifier):
+                return
+            self.bar_key = other.bar_key
+            self.value = other.value
+            self.operation = other.operation
+            self.interval = other.interval
+
+        def run_self_test(self):
+            error_messages = []
+            if self.bar_key is None or self.bar_key == "":
+                error_messages.append((740, f"Bar key {self.bar_key} is invalid."))
+            elif self.passive is not None and self.passive.situation is not None and self.bar_key not in self.passive.situation.bars.keys() and self.bar_key != "ALL":
+                error_messages.append((744, f"Bar key {self.bar_key} not found on situation."))
+            if not isinstance(self.value, (int, float)):
+                error_messages.append((741, f"Value {self.value} is not a float."))
+            if self.operation not in ["+", "*", "%", "value_percent", "range_percent", "gated_percent"]:
+                error_messages.append((742, f"Operation {self.operation} is invalid. Has to be +, *, value_percent, range_percent or gated_percent."))
+            if self.interval not in ["daytime_change", "daily", "weekly", "monthly", "yearly"]:
+                error_messages.append((743, f"Interval {self.interval} is invalid. Has to be daytime_change, daily, weekly, monthly or yearly."))
+            return error_messages
+
+        def apply(self, **kwargs):
+            situation = self.passive.situation
+            mod_key = self.key
+            stat = f"situation:{situation.key}:{self.bar_key}"
+            self.effect = ModifierEffect(
+                mod_key,
+                stat,
+                Modifier_Obj(mod_key, self.operation, self.value),
+                self.interval,
+            )
+            self.effect.apply(**kwargs)
+            situation.track_modifier(
+                mod_key, stat, self.interval, self.operation, self.value
+            )
+            return self
+
+        def revert(self, **kwargs):
+            mod_key = self.key
+            if self.effect is not None:
+                self.effect.revert(**kwargs)
+                self.effect = None
+            # Modifier already removed by ModifierEffect.revert — drop lifecycle entry
+            lifecycle_registry.ping(mod_key, REMOVE)
+            return self
+
+    class SituationEffectCancelSituation(SituationEffect):
+        def __init__(self):
+            super().__init__()
+
+        @property
+        def local_key(self) -> str:
+            return "cancel_situation"
+
+        @property
+        def description(self) -> str:
+            return "Cancel situation"
+
+        def clone(self) -> SituationEffectCancelSituation:
+            return SituationEffectCancelSituation()
+
+        def update_data(self, other: SituationEffect):
+            return
+
+        def run_self_test(self):
+            return []
+
+        def apply(self, **kwargs):
+            situation = self.passive.situation
+            situation.cancel()
+            return self
+
+        def revert(self, **kwargs):
+            return self
+
+    class SituationEffectRegularStatChange(SituationEffect):
+        def __init__(self, stat: str, value: float, rhythm: str):
+            super().__init__()
+            self.stat = stat
+            self.value = value
+            self.rhythm = rhythm  # daytime_change, daily, weekly, monthly, yearly
+
+        @property
+        def local_key(self) -> str:
+            return self.stat + "_" + self.rhythm
+
+        @property
+        def description(self) -> str:
+            stat_name = Stat_Data[self.stat].get_title()
+            rhythm_name = self.rhythm
+            if rhythm_name == "daytime_change":
+                rhythm_name = "Time"
+            elif rhythm_name == "daily":
+                rhythm_name = "Day"
+            elif rhythm_name == "weekly":
+                rhythm_name = "Week"
+            elif rhythm_name == "monthly":
+                rhythm_name = "Month"
+            elif rhythm_name == "yearly":
+                rhythm_name = "Year"
+
+            sign = "+" if self.value >= 0 else ""
+            return f"{stat_name}: {sign}{self.value}/{rhythm_name}"
+
+        def clone(self) -> SituationEffectRegularStatChange:
+            return SituationEffectRegularStatChange(self.stat, self.value, self.rhythm)
+
+        def update_data(self, other: SituationEffect):
+            if not isinstance(other, SituationEffectRegularStatChange):
+                return
+            self.stat = other.stat
+            self.value = other.value
+            self.rhythm = other.rhythm
+
+        def run_self_test(self):
+            error_messages = []
+            if Stat_Data[self.stat] == None:
+                error_messages.append((750, f"Stat {self.stat} not found."))
+            if not isinstance(self.value, (int, float)):
+                error_messages.append((751, f"Value {self.value} is not a float."))
+            if self.rhythm not in ["daytime_change", "daily", "weekly", "monthly", "yearly"]:
+                error_messages.append((752, f"Rhythm {self.rhythm} not found."))
+            return error_messages
+
+        def apply(self, **kwargs):
+            situation = self.passive.situation
+            mod_key = self.key
+            self.effect = ModifierEffect(
+                mod_key,
+                self.stat,
+                Modifier_Obj(mod_key, "+", self.value),
+                self.rhythm,
+            )
+            self.effect.apply(**kwargs)
+            situation.track_modifier(mod_key, self.stat, self.rhythm, "+", self.value)
+            return self
+
+        def revert(self, **kwargs):
+            mod_key = self.key
+            if self.effect is not None:
+                self.effect.revert(**kwargs)
+                self.effect = None
+            # Modifier already removed by ModifierEffect.revert — drop lifecycle entry
+            lifecycle_registry.ping(mod_key, REMOVE)
+            return self
+
+    class SituationEffectGeneral(SituationEffect):
+        """
+        Bridge between the SituationEffect description layer and *any* regular Effect.
+
+        The other SituationEffect types exist because a plain ``Effect`` cannot
+        produce an accurate player-facing description of itself — the SituationEffect
+        supplies that description. That also limits passives/measures to the handful
+        of built-in SituationEffect types. ``SituationEffectGeneral`` removes that
+        limit: it wraps a list of ordinary ``Effect`` objects (money, level, building
+        open/close, stat, …) and applies/reverts them, while the author writes the
+        description(s) to show.
+
+        Several descriptions are supported because in the selection list they are
+        joined comma-separated (via ``description``) and in the detail view they are
+        listed one per row (via ``descriptions``).
+
+        Args:
+            key (str): Stable, author-chosen identity for this effect within its
+                passive/measure. Must be unique among the effects of that
+                passive/measure — the wrapped effect set is *not* enough, since two
+                generals can wrap the same effect types.
+            effects (List[Effect]): Regular effects to apply (and, unless disabled,
+                revert). Not SituationEffects — ordinary game ``Effect`` objects.
+                ``ModifierEffect`` is **rejected**: it registers a persistent modifier
+                outside the Situation lifecycle register and would orphan if the
+                Situation is torn down. Such effects are filtered out at construction
+                with an error log — use ``SituationEffectStatChangeModifier`` /
+                ``SituationEffectBarChangeModifier`` instead.
+            descriptions (List[str]): Player-facing description lines.
+            revert (bool): If ``False``, ``revert()`` is a no-op so the wrapped
+                effects are never undone (e.g. a one-way unlock or a cost that must
+                not be refunded). Default ``True``.
+        """
+
+        def __init__(self, key: str, effects: List[Effect], descriptions: List[str], revert: bool = True):
+            super().__init__()
+            self._key = key
+
+            # ModifierEffect registers a persistent modifier via set_modifier(), which
+            # lives in the global modifier collections — outside the Situation lifecycle
+            # register. Routed through here it would bypass lifecycle cleanup and orphan
+            # if the Situation is torn down. Reject it at construction; authors must use
+            # SituationEffectStatChangeModifier / SituationEffectBarChangeModifier.
+            self._effects = []
+            for effect in (list(effects) if effects else []):
+                if isinstance(effect, ModifierEffect):
+                    log(
+                        f"SituationEffectGeneral '{key}': ModifierEffect '{effect}' is not "
+                        "allowed and was removed. It registers a persistent modifier outside "
+                        "the Situation lifecycle and would orphan. Use "
+                        "SituationEffectStatChangeModifier / SituationEffectBarChangeModifier.",
+                        log_type="error",
+                        category="situation",
+                    )
+                    continue
+                self._effects.append(effect)
+
+            self._descriptions = list(descriptions) if descriptions else []
+            self._do_revert = revert
+            self._applied = False
+
+        @property
+        def local_key(self) -> str:
+            return "general:" + str(self._key)
+
+        @property
+        def description(self) -> str:
+            return ", ".join(self._descriptions)
+
+        @property
+        def descriptions(self) -> list:
+            return list(self._descriptions)
+
+        def clone(self) -> SituationEffectGeneral:
+            return SituationEffectGeneral(
+                self._key,
+                list(self._effects),
+                list(self._descriptions),
+                self._do_revert,
+            )
+
+        def update_data(self, other: SituationEffect):
+            if not isinstance(other, SituationEffectGeneral):
+                return
+            self._key = other._key
+            self._effects = list(other._effects)
+            self._descriptions = list(other._descriptions)
+            self._do_revert = other._do_revert
+
+        def run_self_test(self):
+            error_messages = []
+            if not isinstance(self._key, str) or self._key == "":
+                error_messages.append((760, f"SituationEffectGeneral key {self._key} is invalid."))
+            if not isinstance(self._effects, list) or len(self._effects) == 0:
+                error_messages.append((761, "SituationEffectGeneral needs at least one effect."))
+            else:
+                for effect in self._effects:
+                    if not isinstance(effect, Effect):
+                        error_messages.append((762, f"{effect} is not an Effect."))
+            if not isinstance(self._descriptions, list) or len(self._descriptions) == 0:
+                error_messages.append((763, "SituationEffectGeneral needs at least one description."))
+            else:
+                for desc in self._descriptions:
+                    if not isinstance(desc, str):
+                        error_messages.append((763, f"Description {desc} is not a string."))
+            if not isinstance(self._do_revert, bool):
+                error_messages.append((764, f"revert flag {self._do_revert} is not a bool."))
+            return error_messages
+
+        def apply(self, **kwargs):
+            for effect in self._effects:
+                effect.apply(**kwargs)
+            self._applied = True
+            return self
+
+        def revert(self, **kwargs):
+            if not self._do_revert:
+                return self
+            if not self._applied:
+                return self
+            for effect in self._effects:
+                effect.revert(**kwargs)
+            self._applied = False
+            return self
+
+    # endregion
+    ############################
+
+    #################################
+    # region SituationStartModifier #
+
+    class SituationStartModifier:
+        """
+        Start-value modifier stored on a bar (not in global modifier collections).
+
+        General modifiers (no stat) reshape the running start value with `*`, `value_percent`, `range_percent`, `gated_percent`, `+`.
+        Stat-based modifiers read a school-stat snapshot at situation activation and
+        contribute from that reading.
+
+        Attributes:
+            modifier (Modifier_Obj): Operator and value payload.
+            stat (str | None): Optional school-stat key for snapshot contributions.
+        """
+
+        def __init__(self, modifier: Modifier_Obj, stat: str = None):
+            """
+            Args:
+                modifier (Modifier_Obj): Operator/value used during start calculation.
+                stat (str, optional): School-stat key. None = general modifier.
+            """
+            self.modifier = modifier
+            self.stat = stat
+
+        @property
+        def op(self) -> str:
+            return self.modifier._mod_type if isinstance(self.modifier, Modifier_Obj) else None
+
+        @property
+        def value(self) -> float:
+            return self.modifier.get_value() if isinstance(self.modifier, Modifier_Obj) else None
+
+        def validate(self, bar_key: str = None) -> list:
+            """
+            Validate this start modifier for runtime or definition registration.
+
+            Args:
+                bar_key (str, optional): Bar key for error context.
+
+            Returns:
+                list: ``(code, message)`` pairs; empty if valid.
+            """
+            errors = []
+            loc = f" on bar '{bar_key}'" if bar_key else ""
+
+            if not isinstance(self.modifier, Modifier_Obj):
+                errors.append((766, f"Start modifier{loc} is not a Modifier_Obj."))
+                return errors
+
+            name = self.modifier.get_name()
+            if name is None or name == "":
+                errors.append((769, f"Start modifier{loc} has an empty name."))
+
+            if self.op not in ["+", "*", "%", "value_percent", "range_percent", "gated_percent"]:
+                errors.append((767, f"Start modifier op '{self.op}'{loc} is invalid. Has to be +, *, value_percent, range_percent or gated_percent."))
+
+            if not isinstance(self.value, (int, float)):
+                errors.append((770, f"Start modifier value '{self.value}'{loc} is not a number."))
+
+            if self.stat is not None:
+                if Stat_Data[self.stat] is None:
+                    errors.append((768, f"Start modifier stat '{self.stat}'{loc} not found."))
+
+            return errors
+
+        def clone(self) -> SituationStartModifier:
+            """Return an unbound copy with the same definition."""
+            mod = Modifier_Obj(
+                self.modifier.get_name(),
+                self.modifier._mod_type,
+                self.modifier.get_value(),
+            )
+            return SituationStartModifier(mod, self.stat)
+
+    #endregion
+    #################################
+
+    ############################
+    # region SituationBar #
+
+    class SituationBar:
+        def __init__(self, key: str, regular_decrease_rate: float = 0, regular_decrease_interval: str = "daytime_change"):
+            self.key = key
+
+            self.min = -100
+            self.max = 100
+            self.value = 0
+
+            self.stat_weights = {}
+
+            self._weight = 1.0
+
+            self.tendency = 0
+            self.changes = [] # last 5 bar changes
+
+            self.regular_decrease_rate = regular_decrease_rate
+            self.regular_decrease_interval = regular_decrease_interval
+
+            # Start-value snapshot (applied once on situation activate)
+            self.start_base = 0.0
+            self.start_modifiers = []  # authored definition
+            self.start_shifts = []     # runtime (events); survives definition sync
+            self._start_applied = False
+
+            self.situation = None
+            self._decrease_mod_collection = None
+
+            self.pictograms = []
+
+        @property
+        def decrease_mod_key(self) -> str:
+            """Stable modifier identity; unique per situation bar."""
+            return self.situation.key + ":bar:" + self.key + ":decrease"
+
+        @property
+        def decrease_mod_stat(self) -> str:
+            """Routed by change_stat to situation_manager.apply_progress_change."""
+            return "situation:" + self.situation.key + ":" + self.key
+            
+        def run_self_test(self):
+            error_messages = []
+            if self.min > self.max:
+                error_messages.append((760, f"Min {self.min} is greater than max {self.max}."))
+            if self._weight < 0:
+                error_messages.append((761, f"Weight {self._weight} is less than 0."))
+            if any(Stat_Data[stat] == None for stat in self.stat_weights.keys()):
+                invalid_stats = [stat for stat in self.stat_weights.keys() if Stat_Data[stat] == None]
+                error_messages.append((762, f"Stat(s) {invalid_stats} not found."))
+            if self.key is None or self.key == "":
+                error_messages.append((763, "Key is empty. Has to be a non-empty string."))
+            if self._weight == 0:
+                error_messages.append((764, "Weight is 0. Has to be greater than 0."))
+            if self.regular_decrease_interval not in ["daytime_change", "daily", "weekly", "monthly", "yearly"]:
+                error_messages.append((765, f"Regular decrease interval {self.regular_decrease_interval} not found."))
+            for entry in self.start_modifiers + self.start_shifts:
+                if not isinstance(entry, SituationStartModifier):
+                    error_messages.append((766, f"Start modifier on bar '{self.key}' is invalid."))
+                    continue
+                error_messages.extend(entry.validate(self.key))
+
+            return error_messages
+
+        def update_data(self, bar: SituationBar):
+            if not hasattr(self, "start_base"):
+                self.start_base = 0.0
+            if not hasattr(self, "start_modifiers"):
+                self.start_modifiers = []
+            if not hasattr(self, "start_shifts"):
+                self.start_shifts = []
+            if not hasattr(self, "_start_applied"):
+                # Preserve existing progress on old saves that are already active
+                already_active = (
+                    self.situation is not None
+                    and getattr(self.situation, "state", None) == "active"
+                )
+                self._start_applied = already_active
+
+            self.key = bar.key
+            self.min = bar.min
+            self.max = bar.max
+            self.stat_weights = bar.stat_weights
+            self._weight = bar._weight
+            self.regular_decrease_rate = bar.regular_decrease_rate
+            self.regular_decrease_interval = bar.regular_decrease_interval
+            self.start_base = bar.start_base
+            self.start_modifiers = [entry.clone() for entry in bar.start_modifiers]
+            self.pictograms = [pictogram for pictogram in bar.pictograms]
+            # start_shifts intentionally preserved (runtime event adjustments)
+            return self
+
+        def __str__(self):
+            return "situation:" + self.situation.key + ":" + self.key
+
+        def activate(self):
+            self.apply_decrease_modifier()
+            self.load_start_value()
+
+        def add_pictogram(self, pictogram: Pictogram | str):
+            pictogram_key = pictogram
+            if isinstance(pictogram, Pictogram):
+                pictogram_key = pictogram.key
+            if pictogram_manager is None or not pictogram_manager.has_pictogram(pictogram_key):
+                log(f"Pictogram {pictogram_key} not found.", log_type="error", category="situation")
+                return self
+            if pictogram_key not in self.pictograms:
+                self.pictograms.append(pictogram_key)
+            return self
+
+        def get_pictogram_data(self) -> Dict[str, Dict[str, Any]]:
+            output = {}
+            if pictogram_manager is None:
+                return output
+            for pictogram in self.pictograms:
+                values = self.get_pictogram_values()
+                pictogram_label = pictogram_manager.get_label(pictogram, **values)
+                pictogram_tooltip = pictogram_manager.get_tooltip(pictogram, **values)
+                pictogram_icon = pictogram_manager.get_icon(pictogram, **values)
+                if pictogram_icon is not None:
+                    output[self.situation.key + ":" + self.key + ":" + pictogram] = {
+                        "key": pictogram,
+                        "label": pictogram_label,
+                        "tooltip": pictogram_tooltip,
+                        "icon": pictogram_icon,
+                    }
+            return output
+
+        def get_pictogram_values(self) -> Dict[str, Any]:
+            return {
+                "bar_key": self.key,
+                "bar_value": self.value,
+                "bar_tendency": self.tendency,
+                "bar_area": self.get_bar_value_area(),
+                "bar_mood": self.get_bar_value_mood(),
+                "bar_min": self.min,
+                "bar_max": self.max,
+                "bar_regular_decrease_rate": self.regular_decrease_rate,
+                "bar_regular_decrease_interval": self.regular_decrease_interval,
+            }
+
+        def get_bar_value_area(self) -> int:
+            return get_bar_value_area(self.min, self.max, self.value)
+
+        def get_bar_value_mood(self) -> str:
+            return get_bar_value_mood(self.get_bar_value_area(), self.min, self.max)
+
+        def set_start_base(self, value: float):
+            """
+            Set the basis applied before start modifiers (* → value_percent → range_percent → gated_percent → +).
+
+            Args:
+                value (float): Starting basis (often 0 or a mild negative).
+
+            Returns:
+                SituationBar: self
+            """
+            self.start_base = float(value)
+            return self
+
+        def add_start_modifier(self, modifier: Modifier_Obj | SituationStartModifier, stat: str = None):
+            """
+            Add an authored start-value modifier (synced from definitions).
+            Validates at registration time and rejects invalid entries.
+
+            Args:
+                modifier (Modifier_Obj | SituationStartModifier): Operator/value payload
+                    or a prebuilt start modifier.
+                stat (str, optional): School-stat key for snapshot contribution.
+                    Ignored if ``modifier`` is already a SituationStartModifier.
+
+            Returns:
+                bool: True if the modifier was accepted and stored.
+            """
+            return self._register_start_modifier(self.start_modifiers, modifier, stat)
+
+        def add_start_shift(self, op: str, value: float, name: str = None, stat: str = None):
+            """
+            Add a runtime start-value shift (e.g. from events before activation).
+            Builds the Modifier_Obj internally, validates, then stores it.
+            Survives definition sync via update_data.
+
+            Args:
+                op (str): ``+``, ``*``, ``value_percent``, ``range_percent`` or ``gated_percent``.
+                value (float): Operand (flat, factor, percent, or stat weight).
+                name (str, optional): Modifier identity. Auto-generated if omitted.
+                stat (str, optional): School-stat key for snapshot contribution.
+
+            Returns:
+                bool: True if the shift was accepted and stored.
+            """
+            if name is None:
+                stat_part = stat if stat is not None else "general"
+                name = f"start_shift:{self.key}:{stat_part}:{op}:{value}"
+            return self._register_start_modifier(
+                self.start_shifts,
+                Modifier_Obj(name, op, value),
+                stat,
+            )
+
+        def _register_start_modifier(self, target: list, modifier, stat: str = None) -> bool:
+            """
+            Validate and append a start modifier to the given list.
+
+            Args:
+                target (list): ``start_modifiers`` or ``start_shifts``.
+                modifier (Modifier_Obj | SituationStartModifier): Entry to register.
+                stat (str, optional): Optional stat when building from Modifier_Obj.
+
+            Returns:
+                bool: True if stored; False if validation failed (errors logged).
+            """
+            self._ensure_start_fields()
+
+            if isinstance(modifier, SituationStartModifier):
+                entry = modifier
+            elif isinstance(modifier, Modifier_Obj):
+                entry = SituationStartModifier(modifier, stat)
+            else:
+                log(f"Start modifier on bar '{self.key}' is not a Modifier_Obj or SituationStartModifier.", log_type="error", category="situation")
+                return False
+
+            errors = entry.validate(self.key)
+            if errors:
+                for code, message in errors:
+                    log(message, log_type="error", category="situation")
+                return False
+
+            target.append(entry)
+            return True
+
+        def reset_start_application(self):
+            """Allow load_start_value to run again (e.g. after complete)."""
+            self._start_applied = False
+            return self
+
+        def _ensure_start_fields(self):
+            if not hasattr(self, "start_base"):
+                self.start_base = 0.0
+            if not hasattr(self, "start_modifiers"):
+                self.start_modifiers = []
+            if not hasattr(self, "start_shifts"):
+                self.start_shifts = []
+            if not hasattr(self, "_start_applied"):
+                already_active = (
+                    self.situation is not None
+                    and getattr(self.situation, "state", None) == "active"
+                )
+                self._start_applied = already_active
+
+        def _iter_start_modifiers(self):
+            self._ensure_start_fields()
+            return list(self.start_modifiers) + list(self.start_shifts)
+
+        def _apply_start_star(self, value: float, entry: SituationStartModifier) -> float:
+            if entry.stat is None:
+                return value * entry.value
+            # Normalized snapshot factor: (stat/100) * weight
+            return value * (get_stat_number(entry.stat) / 100.0) * entry.value
+
+        def _apply_start_percent(self, value: float, entry: SituationStartModifier) -> float:
+            if entry.stat is None:
+                return value + value / 100.0 * entry.value
+            # Percent of the snapshot stat (not of running value)
+            return value + get_stat_number(entry.stat) / 100.0 * entry.value
+
+        def _apply_start_plus(self, value: float, entry: SituationStartModifier) -> float:
+            if entry.stat is None:
+                return value + entry.value
+            # Weight × snapshot (e.g. happiness 50 with weight 0.1 → +5)
+            return value + get_stat_number(entry.stat) * entry.value
+
+        def compute_start_value(self) -> float:
+            """
+            Compute the start value from base + modifiers without writing the bar.
+
+            Order: Handles all current modifier operators including: 
+                ``+`` (add), 
+                ``*`` (multiply), 
+                ``value_percent`` (modulo of base value), 
+                ``range_percent``, 
+                ``gated_percent`` 
+            and applies them as specified by the Modifier_Obj/SituationStartModifier entries. 
+            Clamps to bar limits at the end.
+
+            Returns:
+                float: Clamped start value.
+            """
+            self._ensure_start_fields()
+            value = float(self.start_base)
+            entries = self._iter_start_modifiers()
+
+            # STAR: "*"
+            for entry in entries:
+                if entry.op == "*" or entry.op == "mul":
+                    value = self._apply_start_star(value, entry)
+
+            # PERCENT: "%", "value_percent"
+            for entry in entries:
+                if entry.op == "%" or entry.op == "value_percent":
+                    value = self._apply_start_percent(value, entry)
+
+            # RANGE_PERCENT
+            for entry in entries:
+                if entry.op == "range_percent":
+                    # Typically: add this amount of the total range to base value
+                    bar_range = self.max - self.min
+                    if entry.stat is None:
+                        value += (bar_range * entry.value / 100.0)
+                    else:
+                        # If stat provided, scale by stat number
+                        value += (bar_range * get_stat_number(entry.stat) * entry.value / 100.0)
+            
+            # GATED_PERCENT
+            for entry in entries:
+                if entry.op == "gated_percent":
+                    # If stat is given, use as gate/reference, otherwise fall back to bar range
+                    gate_range = get_gated_range(entry.stat if entry.stat else "", entry.value)
+                    value += (gate_range * entry.value / 100.0)
+
+            # PLUS: "+"
+            for entry in entries:
+                if entry.op == "+" or entry.op == "add":
+                    value = self._apply_start_plus(value, entry)
+
+            if value > self.max:
+                value = self.max
+            if value < self.min:
+                value = self.min
+            return value
+       
+
+        def load_start_value(self):
+            """
+            Apply the start-value snapshot once when the situation activates.
+
+            Subsequent calls are no-ops until reset_start_application (complete).
+            """
+            self._ensure_start_fields()
+            if self._start_applied:
+                return self
+            self.value = self.compute_start_value()
+            self._start_applied = True
+            return self
+
+        def apply_decrease_modifier(self):
+            """
+            Register the constant bar decrease modifier in the rhythm collection.
+
+            Skips registration while the cascading resolution breather is active.
+
+            Returns:
+                SituationBar: self
+            """
+            if self.situation is None or self.regular_decrease_rate == 0:
+                self.revert_decrease_modifier()
+                return self
+
+            if (
+                situation_manager is not None
+                and situation_manager.is_resolution_breather_active()
+            ):
+                self.revert_decrease_modifier()
+                return self
+
+            modifier = Modifier_Obj(self.decrease_mod_key, "+", self.regular_decrease_rate)
+            set_modifier(
+                self.decrease_mod_key,
+                modifier,
+                stat=self.decrease_mod_stat,
+                collection=self.regular_decrease_interval,
+            )
+            self.situation.track_modifier(
+                self.decrease_mod_key,
+                self.decrease_mod_stat,
+                self.regular_decrease_interval,
+                "+",
+                self.regular_decrease_rate,
+            )
+            self._decrease_mod_collection = self.regular_decrease_interval
+            return self
+
+        def revert_decrease_modifier(self):
+            """
+            Remove the bar decrease modifier from the global registry.
+
+            Returns:
+                SituationBar: self
+            """
+            if self.situation is None:
+                return self
+
+            if lifecycle_registry.has(self.decrease_mod_key):
+                self.situation.untrack_and_remove(self.decrease_mod_key)
+            else:
+                collection = self._decrease_mod_collection or self.regular_decrease_interval
+                remove_modifier(
+                    self.decrease_mod_key,
+                    stat=self.decrease_mod_stat,
+                    collection=collection,
+                )
+            self._decrease_mod_collection = None
+            return self
+
+        def sync_decrease_modifier(self):
+            """
+            Refresh decrease modifier definition after template reload.
+
+            Re-applies only while the parent situation is active. A paused
+            situation re-applies too; its update_data/resume() decides whether the
+            modifier sleeps.
+
+            Returns:
+                SituationBar: self
+            """
+            self.revert_decrease_modifier()
+            if self.situation is not None and self.situation.state == "active":
+                self.apply_decrease_modifier()
+            return self
+
+        def add_stat_weight(self, stat: str, weight: int):
+            self.stat_weights[stat] = weight
+            return self
+
+        def set_weight(self, weight: float):
+            self._weight = weight
+            return self
+
+        def set_limits(self, min: int, max: int):
+            self.min = min
+            self.max = max
+            return self
+
+        def change_value(self, delta: float):
+            """
+            Move this bar by ``delta`` and fire any crossed thresholds.
+
+            Inactive, completed, and cancelled situations ignore the call.
+            Bar mutation and threshold/resolution checks start only after
+            ``activate()``.
+
+            Args:
+                delta (float): Signed change in bar units.
+            """
+            if self.situation is None or not self.situation.is_running():
+                return
+            if delta < 0 and self.situation.should_block_negative_delta():
+                return
+
+            old_value = self.value
+            thresholds, blocking = self.situation.get_thresholds_in_range(self.value, self.key, abs(delta), delta)
+            if blocking != None:
+                self.value = blocking.bounds[self.key]
+            else:
+                self.value += delta
+                if self.value > self.max:
+                    self.value = self.max
+                if self.value < self.min:
+                    self.value = self.min
+
+            actual_change = self.value - old_value
+            self.changes.append(actual_change)
+            if len(self.changes) > 5:
+                self.changes.pop(0)
+            self.tendency = sum(self.changes) / len(self.changes)
+
+            for threshold in thresholds:
+                if threshold.is_bar_values_reached():
+                    threshold.trigger_threshold()
+
+            self.situation.check_resolutions()
+
+        def change_value_via_stats(self, key: str, delta: float):
+            if key in self.stat_weights.keys():
+                self.change_value(delta * self.stat_weights[key])
+
+        def reached_min(self):
+            return self.value == self.min       
+
+        def reached_max(self):
+            return self.value == self.max
+
+        def get_full_range(self) -> float:
+            """
+            Returns the full available range of the bar.
+
+            Returns:
+                float: ``max - min``.
+            """
+            return self.max - self.min
+
+        def get_gate(self, direction: int) -> float:
+            """
+            Returns the next blocking-threshold gate in the given direction.
+
+            If no blocking threshold remains in that direction, the corresponding
+            bar end is used (``max`` for +, ``min`` for -).
+
+            Args:
+                direction (int): Search direction. Positive for the upward gate,
+                    negative for the downward gate.
+
+            Returns:
+                float: Gate value for the given direction.
+            """
+            if direction == 0:
+                return self.value
+
+            if self.situation is None:
+                return self.max if direction > 0 else self.min
+
+            thresholds = self.situation.get_next_blocking_thresholds(direction)
+            threshold = thresholds.get(self.key)
+            if threshold is None:
+                return self.max if direction > 0 else self.min
+            return threshold.bounds[self.key]
+
+        def get_gated_bounds(self, modifier_value: float) -> tuple:
+            """
+            Returns the gated bounds for a modifier relative to the current bar value.
+
+            Blocking thresholds act as gates. Rules:
+            - modifier >= 0 and progress >= 0 → ``(0, positive_gate)``
+            - modifier < 0 and progress < 0 → ``(0, negative_gate)``
+            - modifier >= 0 and progress < 0 → ``(progress, positive_gate)``
+            - modifier < 0 and progress >= 0 → ``(progress, negative_gate)``
+
+            Args:
+                modifier_value (float): Modifier value whose sign selects the rule.
+
+            Returns:
+                tuple: ``(start, end)`` of the gated range. Order follows the rules
+                    above and is not sorted.
+            """
+            progress = self.value
+            positive_gate = self.get_gate(1)
+            negative_gate = self.get_gate(-1)
+
+            if modifier_value >= 0 and progress >= 0:
+                return (0, positive_gate)
+            if modifier_value < 0 and progress < 0:
+                return (0, negative_gate)
+            if modifier_value >= 0 and progress < 0:
+                return (progress, positive_gate)
+            return (progress, negative_gate)
+
+        def get_gated_range(self, modifier_value: float) -> float:
+            """
+            Returns the size of the gated range for a modifier on this bar.
+
+            Uses ``get_gated_bounds`` and returns the absolute span between start
+            and end. Intended as reference range for upcoming modifier operators.
+
+            Args:
+                modifier_value (float): Modifier value whose sign selects the gate rule.
+
+            Returns:
+                float: Absolute size of the gated range.
+            """
+            start, end = self.get_gated_bounds(modifier_value)
+            return abs(end - start)
+
+        def check_threshold_hold(self, threshold: SituationThreshold):
+            threshold_value = threshold.bounds[self.key]
+            hold = threshold.hold
+            direction = threshold.direction
+
+            if (direction < 0 and threshold_value + hold < self.value) or \
+                (direction > 0 and threshold_value - hold > self.value):
+                return True
+            return False
+
+    #endregion
+    #################################
+
+    ##############################
+    # region SituationEventPools #
+
+    class SituationEventPools:
+        def __init__(self, key: str, min: int, max: int, bar: str = None):
+            self.key = key
+            self.min = min
+            self.max = max
+            self.situation = None
+            self.bar = bar
+
+        def __str__(self):
+            return "situation_pool:" + self.situation.key + ":" + self.key
+
+        def update_data(self, pool: SituationEventPools):
+            self.key = pool.key
+            self.min = pool.min
+            self.max = pool.max
+            self.bar = pool.bar
+            return self
+
+        def run_self_test(self):
+            error_messages = []
+            if self.min > self.max:
+                error_messages.append((771, f"Min {self.min} is greater than max {self.max}."))
+            if self.bar is not None:
+                if self.bar not in self.situation.bars.keys():
+                    error_messages.append((770, f"Bar {self.bar} not found."))
+                else:    
+                    if self.min < self.situation.bars[self.bar].min:
+                        error_messages.append((772, f"Min {self.min} is less than bar {self.bar} min {self.situation.bars[self.bar].min}."))
+                    if self.max > self.situation.bars[self.bar].max:
+                        error_messages.append((773, f"Max {self.max} is greater than bar {self.bar} max {self.situation.bars[self.bar].max}."))
+            else:
+                if self.min < self.situation.get_combined_bar_min():
+                    error_messages.append((774, f"Min {self.min} is less than combined bar min {self.situation.get_combined_bar_min()}."))
+                if self.max > self.situation.get_combined_bar_max():
+                    error_messages.append((775, f"Max {self.max} is greater than combined bar max {self.situation.get_combined_bar_max()}."))
+            return error_messages
+
+        def check_pool(self):
+            if self.bar is None:
+                combined_bar = self.situation.get_combined_bar_value()
+                return combined_bar >= self.min and combined_bar <= self.max
+            else:
+                bar_value = self.situation.bars[self.bar].value
+                return bar_value >= self.min and bar_value <= self.max
+
+    #endregion
+    ##############################
+
+    ##############################
+    # region SituationResolution #
+
+    class SituationResolution(ABC):
+        """
+        Base resolution. Intrinsically "reached" when subclass condition holds;
+        fires only when gating conditions are fulfilled (or immediately if none).
+        """
+
+        def __init__(self, key: str, value, *elements):
+            self.key = key
+            self.value = value
+            self.situation = None
+            self.effects = EffectStorage()
+            self.conditions = ConditionStorage()
+            self._grace_active = False
+
+            for element in elements:
+                if isinstance(element, Condition):
+                    self.conditions.add_condition(element)
+                elif isinstance(element, Effect):
+                    self.effects.effects.append(element)
+
+        @property
+        def counter_key(self) -> str:
+            """Stable key for resolution latch kwargs / LatchCounterCondition."""
+            situation_key = self.situation.key if self.situation is not None else ""
+            return f"situation_resolution:{situation_key}:{self.key}"
+
+        @property
+        def has_grace(self) -> bool:
+            """Grace period exists when gating conditions are configured."""
+            return len(self.conditions) > 0
+
+        def bind_situation(self, situation):
+            """Attach parent situation and finalize latch keys if needed."""
+            self.situation = situation
+            self._bind_latch_keys()
+            return self
+
+        def _bind_latch_keys(self):
+            """Override latch counter_key on conditions unless NoOverride is set."""
+            for condition in self.conditions.find_by_type("latch_counter"):
+                if condition.get_option_set().has_option("NoOverride"):
+                    continue
+                condition.counter_key = self.counter_key
+
+        def run_self_test(self):
+            error_messages = []
+            if len(self.effects) == 0:
+                error_messages.append((780, "No effects provided."))
+            return error_messages
+
+        @abstractmethod
+        def is_reached(self) -> bool:
+            """Intrinsic resolution state (bar limit / deadline), ignoring gates."""
+            pass
+
+        def get_timer_conditions(self) -> list:
+            return self.conditions.find_by_type("timer")
+
+        def start_grace(self):
+            """Begin grace: start timers found in the condition storage."""
+            if self._grace_active:
+                return
+            self._grace_active = True
+            for timer_condition in self.get_timer_conditions():
+                set_timer(timer_condition.id, "now")
+            self._on_enter_grace()
+
+        def end_grace(self):
+            """Leave grace: remove timers and clear grace flag."""
+            if not self._grace_active:
+                return
+            for timer_condition in self.get_timer_conditions():
+                remove_timer(timer_condition.id)
+            self._grace_active = False
+
+        def _build_check_kwargs(self, **kwargs) -> dict:
+            check_kwargs = dict(kwargs)
+            check_kwargs[self.counter_key] = self.is_reached()
+            return check_kwargs
+
+        def check_conditions(self, **kwargs) -> bool:
+            if not self.has_grace:
+                return True
+            return self.conditions.is_fulfilled(**self._build_check_kwargs(**kwargs))
+
+        def fire(self) -> bool:
+            """End grace, complete situation, apply effects."""
+            self.end_grace()
+            # Complete before applying effects so the situation leaves "active"
+            # even if an effect jumps. Event effects are queued and run by
+            # drain_situation_events once the current Python has finished.
+            if self.situation is not None:
+                self.situation.complete()
+            begin_situation_event_deferral()
+            try:
+                self.effects.apply(conditions = self.conditions)
+            finally:
+                end_situation_event_deferral()
+            for effect in self.effects.find_by_type("modifier"):
+                lifecycle_registry.track(
+                    effect.key,
+                    owner=self.counter_key,
+                    category=effect.key,
+                    kind="modifier",
+                    stat=effect.stat,
+                    collection=effect.collection,
+                    op=effect.modifier.get_mod_type(),
+                    value=effect.modifier.get_value(),
+                )
+            return True
+
+        def evaluate(self, **kwargs) -> bool:
+            """
+            Evaluate reach + grace/gates. Returns True if the resolution fired.
+
+            Reach without grace conditions → fire immediately.
+            Reach with conditions → start grace/timers; fire when conditions pass.
+            Leave reach → end grace (timers removed).
+            """
+            reached = self.is_reached()
+            check_kwargs = self._build_check_kwargs(**kwargs)
+
+            if not reached:
+                if self._grace_active:
+                    self._notify_left_reach(check_kwargs)
+                    self.end_grace()
+                return False
+
+            if not self.has_grace:
+                return self.fire()
+
+            if not self._grace_active:
+                if not self._can_enter_grace(check_kwargs):
+                    return self.fire()
+                self.start_grace()
+
+            if self.check_conditions(**kwargs):
+                return self.fire()
+            return False
+
+        def _can_enter_grace(self, check_kwargs: dict) -> bool:
+            """Subclasses may block further grace (e.g. latch exhausted). Default: allow."""
+            return True
+
+        def _on_enter_grace(self):
+            """Hook when entering grace (e.g. negative latch rising edge)."""
+            pass
+
+        def _notify_left_reach(self, check_kwargs: dict):
+            """Hook when leaving reached state (e.g. negative latch falling edge)."""
+            pass
+
+        def update_data(self, resolution: SituationResolution):
+            self.value = resolution.value
+            self.effects = resolution.effects
+            self.conditions = resolution.conditions
+            self._bind_latch_keys()
+            for effect in self.effects.find_by_type("modifier"):
+                keep_managed_modifier(effect.key)
+            return self
+
+    class SituationNegativeResolution(SituationResolution):
+        def __init__(self, value: str, *elements, grace_count: int = None):
+            # value: ALL, ANY
+            super().__init__("negative_resolution", value, *elements)
+            self.grace_count = grace_count
+            self.latch = None
+            if grace_count is not None:
+                self.latch = LatchCounterCondition(self.counter_key, grace_count)
+
+        def bind_situation(self, situation):
+            super().bind_situation(situation)
+            if self.latch is not None:
+                self.latch.counter_key = self.counter_key
+            return self
+
+        def run_self_test(self):
+            error_messages = super().run_self_test()
+            if self.value not in ["ALL", "ANY"]:
+                error_messages.append((781, f"Value {self.value} is not valid. Has to be ALL or ANY."))
+            if self.grace_count is not None and (not isinstance(self.grace_count, int) or self.grace_count < 1):
+                error_messages.append((784, f"grace_count {self.grace_count} is invalid. Has to be a positive int or None."))
+            return error_messages
+
+        def is_reached(self) -> bool:
+            if self.value == "ALL":
+                return all(bar.reached_min() for bar in self.situation.bars.values())
+            if self.value == "ANY":
+                return any(bar.reached_min() for bar in self.situation.bars.values())
+            return False
+
+        def _can_enter_grace(self, check_kwargs: dict) -> bool:
+            if self.latch is None or not self.has_grace:
+                return True
+            # Exhausted latch → no further grace, fire immediately on reach
+            count = get_game_data(f"latch_counter_count:{self.latch.counter_key}", 0)
+            return count < self.latch.max
+
+        def _on_enter_grace(self):
+            if self.latch is not None:
+                self.latch.is_fulfilled(**self._build_check_kwargs())
+
+        def _notify_left_reach(self, check_kwargs: dict):
+            if self.latch is not None:
+                self.latch.is_fulfilled(**check_kwargs)
+
+        def fire(self) -> bool:
+            """
+            Apply negative resolution effects and trigger the cascading breather.
+
+            Returns:
+                bool: True after the resolution fires.
+            """
+            result = super().fire()
+            if result and situation_manager is not None:
+                situation_manager.trigger_resolution_breather()
+            return result
+
+        def update_data(self, resolution: SituationResolution):
+            super().update_data(resolution)
+            if isinstance(resolution, SituationNegativeResolution):
+                self.grace_count = resolution.grace_count
+                if self.grace_count is not None:
+                    self.latch = LatchCounterCondition(self.counter_key, self.grace_count)
+                else:
+                    self.latch = None
+            return self
+
+    class SituationPositiveResolution(SituationResolution):
+        def __init__(self, value: str, *elements, delta_lock: bool = False):
+            # value: ALL, ANY
+            super().__init__("positive_resolution", value, *elements)
+            self.delta_lock = delta_lock
+
+        def run_self_test(self):
+            error_messages = super().run_self_test()
+            if self.value not in ["ALL", "ANY"]:
+                error_messages.append((782, f"Value {self.value} is not valid. Has to be ALL or ANY."))
+            return error_messages
+
+        def is_reached(self) -> bool:
+            if self.value == "ALL":
+                return all(bar.reached_max() for bar in self.situation.bars.values())
+            if self.value == "ANY":
+                return any(bar.reached_max() for bar in self.situation.bars.values())
+            return False
+
+        def update_data(self, resolution: SituationResolution):
+            super().update_data(resolution)
+            if isinstance(resolution, SituationPositiveResolution):
+                self.delta_lock = resolution.delta_lock
+            return self
+
+    class SituationDeadlineResolution(SituationResolution):
+        def __init__(self, value: Time, *elements):
+            super().__init__("deadline_resolution", value, *elements)
+
+        def run_self_test(self):
+            error_messages = super().run_self_test()
+            if not isinstance(self.value, Time):
+                error_messages.append((783, "Value is not a Time object."))
+            return error_messages
+
+        def is_reached(self) -> bool:
+            # Paused time pushes the deadline back. The offset lives on the
+            # situation because update_data resets self.value on every load.
+            deadline = Time(self.value)
+            if self.situation is not None:
+                deadline.add_time(daytime = self.situation.get_paused_daytimes())
+            return time.now_is_after_time(
+                deadline.get_day(),
+                deadline.get_month(),
+                deadline.get_year(),
+                deadline.get_daytime(),
+            )
+
+    class SituationConditionResolution(SituationResolution):
+        """
+        Resolution that fires solely from its ConditionStorage.
+
+        Bar fill, deadlines, and other situation progress are ignored. As soon as
+        the configured conditions are fulfilled, effects apply and the situation
+        completes (while the situation is still active and checked).
+        """
+
+        def __init__(self, key: str, *elements):
+            """
+            Args:
+                key (str): Unique resolution key on the situation.
+                *elements: ``Condition`` and/or ``Effect`` instances. At least one
+                    of each is required (validated in ``run_self_test``).
+            """
+            super().__init__(key, None, *elements)
+
+        @property
+        def has_grace(self) -> bool:
+            """
+            Conditions are the reach criteria, not a post-reach grace gate.
+
+            Returns:
+                bool: Always ``False``.
+            """
+            return False
+
+        def run_self_test(self):
+            error_messages = super().run_self_test()
+            if self.key is None or self.key == "":
+                error_messages.append((785, "Condition resolution key is empty."))
+            if len(self.conditions) == 0:
+                error_messages.append((786, "Condition resolution needs at least one Condition."))
+            return error_messages
+
+        def is_reached(self) -> bool:
+            """
+            True when every stored condition is fulfilled.
+
+            Returns:
+                bool: Condition fulfillment, independent of bars / deadlines.
+            """
+            if len(self.conditions) == 0:
+                return False
+            return self.conditions.is_fulfilled()
+
+    # endregion
+    ##############################
+
+    ###############################
+    # region SituationDescription #
+
+    class SituationDescription:
+        def __init__(self, description: str | List[str], *conditions: Condition):
+            self.description = [description] if isinstance(description, str) else description
+            self.conditions = ConditionStorage(*conditions)
+
+        def get_description(self, **kwargs):
+            if self.conditions.is_fulfilled(**kwargs):
+                return self.description
+            return []
+
+    #endregion
+    ###############################
+
+    ####################
+    # region Situation #
+
+    class Situation:
+        def __init__(self, key: str, name: str, *elements: SituationBar | SituationPassive | SituationEventPools | SituationTeaser | SituationThreshold | SituationResolution, thumbnail: str = None, flag: str = None, flag_exclusive: bool = True):
+            self.key = key
+            self.name = name
+            # Event flag this situation runs under (same rules as FlagCondition).
+            # Without a match the situation pauses (reason "flag").
+            self.flag = flag
+            self.flag_exclusive = flag_exclusive
+            self.descriptions = []
+            self.resolutions = {}
+            self.add_resolution(SituationPositiveResolution("ALL"))
+            self.bars = {}
+            self.bar_weights = None
+            self.passives = {}
+            self.deadline = None
+            self.event_pools = {}
+            self.comments = []
+            self.teasers = {}
+            self.pause_until = None
+            self.state = "inactive"
+            # Pause (see pause()/resume()): state stays "active", nothing ticks.
+            # Paused while at least one reason ("manual", "flag") is set.
+            self.pause_reasons = []
+            self.pause_started = None
+            self.paused_daytimes = 0
+            # Redirect the path into the current mod's folder (base = "" prefix).
+            self.thumbnail = get_mod_path(active_mod_key) + thumbnail if thumbnail else thumbnail
+            self.thresholds = {}
+            self.active_passive = None
+            self.active_measure = None
+            self.threshold_holds = {}
+            self.pictograms = []
+
+            self.invalid = False
+
+            for element in elements:
+                if isinstance(element, SituationBar):
+                    self.add_bar(element)
+                elif isinstance(element, SituationThreshold):
+                    self.add_threshold(element)
+                elif isinstance(element, SituationResolution):
+                    self.add_resolution(element)
+                elif isinstance(element, SituationMeasure):
+                    self.add_passive(element)
+                elif isinstance(element, SituationPassive):
+                    self.add_passive(element)
+                elif isinstance(element, SituationEventPools):
+                    self.add_event_pool(element)
+                elif isinstance(element, SituationTeaser):
+                    self.add_teaser(element)
+                elif isinstance(element, SituationDescription):
+                    self.add_description(element)
+                elif isinstance(element, Pictogram):
+                    self.add_pictogram(element)
+            self.update_weights()
+
+        def update_weights(self):
+            self.set_bar_weights({key: bar._weight for key, bar in self.bars.items()})
+       
+            return 
+
+        @property
+        def visible(self):
+            return self.visibility_state == "active" or self.visibility_state == "teaser_active"
+
+        def get_journal_alert_topic(self):
+            """
+            Journal alert topic used when this situation has unseen changes.
+
+            Unlockables override this so they ping the Unlockables page instead
+            of the Situations page. See ``wiki/Journal-Alerts.md``.
+
+            Returns:
+                str: Topic key registered with ``register_journal_alert_topic``.
+            """
+            return "situations"
+
+        @property
+        def visibility_state(self):
+            if self.state == "completed":
+                return "completed"
+            elif self.state == "active":
+                return "active"
+            elif any(teaser.active for teaser in self.teasers.values()):
+                return "teaser_active"
+            else:
+                return "inactive"
+
+        def run_self_test(self):
+            error_messages = []
+
+            for threshold in self.thresholds.values():
+                error_messages.extend(threshold.run_self_test())
+
+            for bar in self.bars.values():
+                error_messages.extend(bar.run_self_test())
+
+            if len(self.bars) == 0:
+                error_messages.append((790, "No bars provided."))
+
+            for passive in self.passives.values():
+                error_messages.extend(passive.run_self_test())
+
+            for event_pool in self.event_pools.values():
+                error_messages.extend(event_pool.run_self_test())
+
+            for teaser in self.teasers.values():
+                error_messages.extend(teaser.run_self_test())
+
+            for resolution in self.resolutions.values():
+                error_messages.extend(resolution.run_self_test())
+
+            # For each bar, collect all thresholds that have a bound for this bar.
+            # Then, sort these thresholds in ascending order based on their bound value for this bar.
+            # Next, for each consecutive pair of thresholds, check for all bounds they share:
+            # If the difference (delta) between their bounds changes sign (i.e., from positive to negative or vice versa),
+            # this indicates an inconsistent (non-monotonic) order of threshold bounds for that bar, which will be reported as an error.
+            for bar_key, bar in self.bars.items():
+                thresholds_with_bar = [threshold for threshold in self.thresholds.values() if bar_key in threshold.bounds]
+                # Sort thresholds by bound for this bar (ascending)
+                thresholds_with_bar_sorted = sorted(thresholds_with_bar, key=lambda x: x.bounds[bar_key])
+                for i in range(len(thresholds_with_bar_sorted) - 1):
+                    threshold_1 = thresholds_with_bar_sorted[i]
+                    threshold_2 = thresholds_with_bar_sorted[i + 1]
+                    direction = 0
+                    for bar_key_2, value_1 in threshold_1.bounds.items():
+                        # Only check bars that both thresholds have bounds for
+                        if bar_key_2 not in threshold_2.bounds:
+                            continue
+                        delta = threshold_2.bounds[bar_key_2] - value_1
+                        # Skip if the value does not change
+                        if delta == 0:
+                            continue
+                        # Set the initial direction
+                        if direction == 0:
+                            direction = delta
+                        # If the sign of the delta changes, report an error
+                        elif delta * direction < 0:
+                            error_messages.append((
+                                791,
+                                f"Sign change in threshold bounds on bar '{bar_key_2}' "
+                                f"between {threshold_1.key} and {threshold_2.key} "
+                                f"(ordered by '{bar_key}')."
+                            ))
+
+            if self.key is None or self.key == "":
+                error_messages.append((792, "Key is empty. Has to be a non-empty string."))
+            if self.name is None or self.name == "":
+                error_messages.append((793, "Name is empty. Has to be a non-empty string."))
+
+            for bar_weight_key in self.bar_weights.keys():
+                if bar_weight_key not in self.bars.keys():
+                    error_messages.append((796, f"Bar weight key '{bar_weight_key}' not found in bars."))
+       
+
+            return error_messages
+
+        def update_data(self, situation: Situation):
+            self.key = situation.key
+            self.name = situation.name
+            self.descriptions = situation.descriptions
+            self.deadline = situation.deadline
+            self.comments = situation.comments
+            self.thumbnail = situation.thumbnail
+            self.bar_weights = situation.bar_weights
+            self.pictograms = situation.pictograms
+            self.flag = getattr(situation, "flag", None)
+            self.flag_exclusive = getattr(situation, "flag_exclusive", True)
+
+            if not hasattr(self, "active_passive"):
+                self.active_passive = None
+            if not hasattr(self, "active_measure"):
+                self.active_measure = None
+            if not hasattr(self, "threshold_holds"):
+                self.threshold_holds = {}
+            if not hasattr(self, "invalid"):
+                self.invalid = False
+            if not hasattr(self, "pause_reasons"):
+                # saves from before pause reasons: a pause was always manual
+                self.pause_reasons = ["manual"] if self.__dict__.pop("paused", False) else []
+            if not hasattr(self, "pause_started"):
+                self.pause_started = None
+            if not hasattr(self, "paused_daytimes"):
+                self.paused_daytimes = 0
+
+            previous_active = self.active_passive
+            previous_measure = self.active_measure
+            if previous_active in self.passives:
+                self.passives[previous_active].revert_effects()
+            if previous_measure in self.passives:
+                self.passives[previous_measure].revert_effects()
+            # Dropped modifiers stay in lifecycle_registry until wave sweep;
+            # re-applied ones track/ping KEEP during this check wave.
+            for passive in self.passives.values():
+                passive.detach_effects()
+
+            # Sync resolutions (keep runtime grace state; refresh definition from template)
+            for key, resolution in situation.resolutions.items():
+                if key in self.resolutions:
+                    self.resolutions[key].update_data(resolution)
+                    self.resolutions[key].bind_situation(self)
+                else:
+                    self.add_resolution(resolution)
+
+            # Sync bars with situation's bars
+            new_keys = set(situation.bars.keys())
+            for key in new_keys:
+                if key in self.bars:
+                    self.bars[key].update_data(situation.bars[key])
+                else:
+                    self.add_bar(situation.bars[key])
+            for key in list(self.bars.keys()):
+                if key not in new_keys:
+                    self.bars[key].revert_decrease_modifier()
+                    del self.bars[key]
+
+            # Sync thresholds with situation's thresholds
+            new_keys = set(situation.thresholds.keys())
+            for key in new_keys:
+                if key in self.thresholds:
+                    self.thresholds[key].update_data(situation.thresholds[key])
+                else:
+                    self.add_threshold(situation.thresholds[key])
+            for key in list(self.thresholds.keys()):
+                if key not in new_keys:
+                    del self.thresholds[key]
+
+            # Sync passives with situation's passives
+            new_keys = set(situation.passives.keys())
+            for key in new_keys:
+                if key in self.passives:
+                    self.passives[key].update_data(situation.passives[key])
+                else:
+                    self.add_passive(situation.passives[key])
+
+            for key in list(self.passives.keys()):
+                if key not in new_keys:
+                    del self.passives[key]
+
+            # Restore active passive / measure after definition sync
+            target_passive = previous_active if previous_active in self.passives else None
+            target_measure = previous_measure if previous_measure in self.passives else None
+            if target_measure is not None:
+                restored_measure = self.passives[target_measure]
+                if (
+                    isinstance(restored_measure, SituationMeasure)
+                    and restored_measure.duration is None
+                    and not getattr(restored_measure, "open_ended", False)
+                ):
+                    # Instant measures must not occupy the slot across reloads.
+                    restored_measure.deactivate()
+                    target_measure = None
+
+            self.active_passive = target_passive
+            self.active_measure = target_measure
+            if self.state == "active":
+                if target_passive is not None:
+                    self.set_passive(target_passive, skip_clear=True)
+                if target_measure is not None:
+                    self.set_measure(target_measure, skip_clear=True)
+                for bar in self.bars.values():
+                    bar.sync_decrease_modifier()
+                if self.is_paused():
+                    # Effects are re-applied above so non-modifier effects (game data)
+                    # stay set; the modifiers go back to sleep until resume().
+                    lifecycle_registry.hibernate_category("situations", self.key, kind="modifier")
+
+            # Sync event pools with situation's event pools
+            new_keys = set(situation.event_pools.keys())
+            for key in new_keys:
+                if key in self.event_pools:
+                    self.event_pools[key].update_data(situation.event_pools[key])
+                else:
+                    self.add_event_pool(situation.event_pools[key])
+            for key in list(self.event_pools.keys()):
+                if key not in new_keys:
+                    del self.event_pools[key]
+
+            # Sync teasers with situation's teasers (preserve active state via update_data)
+            new_keys = set(situation.teasers.keys())
+            for key in new_keys:
+                if key in self.teasers:
+                    self.teasers[key].update_data(situation.teasers[key])
+                else:
+                    self.add_teaser(situation.teasers[key])
+            for key in list(self.teasers.keys()):
+                if key not in new_keys:
+                    del self.teasers[key]
+
+        def activate(self):
+            if self.state == "active" and self.is_paused():
+                # re-activating would wake the paused modifiers; use resume()
+                return self
+            already_active = self.state == "active"
+            self.state = "active"
+            if self.active_passive in self.passives:
+                self.set_passive(self.active_passive, skip_clear=True)
+            if self.active_measure in self.passives:
+                self.set_measure(self.active_measure, skip_clear=True)
+            for bar in self.bars.values():
+                bar.activate()
+            if not already_active:
+                notify_situation_journal_alert(self)
+            # activated under a non-matching flag: pause right away
+            self.sync_flag_pause()
+            return self
+
+        def complete(self):
+            already_completed = self.state == "completed"
+            if self.active_passive in self.passives:
+                self.passives[self.active_passive].deactivate()
+            if self.active_measure in self.passives:
+                self.passives[self.active_measure].deactivate()
+            for bar in self.bars.values():
+                bar.revert_decrease_modifier()
+                bar.reset_start_application()
+            self.clear_tracked_modifiers()
+            for passive in self.passives.values():
+                passive.detach_effects()
+            self.active_passive = None
+            self.active_measure = None
+            self._clear_pause()
+            self.state = "completed"
+            if not already_completed:
+                notify_situation_journal_alert(self)
+
+        def cancel(self):
+            """
+            Abort the situation and clear owned runtime resources.
+
+            Also drops a pending PTA ``voteProposal`` when it points at this situation.
+            """
+            self.state = "cancelled"
+            self._clear_pause()
+            if self.active_passive in self.passives:
+                self.passives[self.active_passive].deactivate()
+            if self.active_measure in self.passives:
+                self.passives[self.active_measure].deactivate()
+            for bar in self.bars.values():
+                bar.revert_decrease_modifier()
+            self.clear_tracked_modifiers()
+            for passive in self.passives.values():
+                passive.detach_effects()
+            self.active_passive = None
+            self.active_measure = None
+
+            proposal = get_game_data("voteProposal")
+            if proposal is self or (getattr(proposal, "key", None) == self.key):
+                if isinstance(proposal, Unlockable):
+                    proposal.release_vote_money()
+                set_game_data("voteProposal", None)
+            return self
+
+        def deactivate(self):
+            """
+            Cheat/testing helper: return an active situation to ``inactive``,
+            reversing :meth:`activate`. Deactivates the active passive/measure,
+            removes the bar decrease modifier and every tracked modifier, detaches
+            passive effects, and resets each bar's start-value application so a later
+            ``activate()`` recomputes a fresh start snapshot. Bars keep their current
+            value; thresholds keep their reached state. Unlike :meth:`cancel` the
+            situation stays selectable and can simply be activated again.
+            """
+            self.state = "inactive"
+            self._clear_pause()
+            if self.active_passive in self.passives:
+                self.passives[self.active_passive].deactivate()
+            if self.active_measure in self.passives:
+                self.passives[self.active_measure].deactivate()
+            for bar in self.bars.values():
+                bar.revert_decrease_modifier()
+                bar.reset_start_application()
+            self.clear_tracked_modifiers()
+            for passive in self.passives.values():
+                passive.detach_effects()
+            self.active_passive = None
+            self.active_measure = None
+
+            proposal = get_game_data("voteProposal")
+            if proposal is self or (getattr(proposal, "key", None) == self.key):
+                if isinstance(proposal, Unlockable):
+                    proposal.release_vote_money()
+                set_game_data("voteProposal", None)
+            return self
+
+        ################
+        # region Pause #
+
+        def is_paused(self) -> bool:
+            """Whether the situation is paused (it still counts as ``active``)."""
+            return bool(self.get_pause_reasons())
+
+        def get_pause_reasons(self) -> list:
+            """Why the situation is paused: ``"manual"`` (pause()) and/or ``"flag"`` (event flag)."""
+            return getattr(self, "pause_reasons", None) or []
+
+        def is_running(self) -> bool:
+            """
+            Active and not paused. Use this for anything that *does* something
+            (bars, thresholds, resolutions, passives, pools); use ``state`` for display.
+            """
+            return self.state == "active" and not self.is_paused()
+
+        def get_paused_daytimes(self) -> int:
+            """Total daytimes this situation has spent paused (finished pauses only)."""
+            return getattr(self, "paused_daytimes", 0) or 0
+
+        def _owned_timer_ids(self) -> list:
+            """Timer ids that belong to this situation and must not run while paused."""
+            ids = []
+            for passive in self.passives.values():
+                if isinstance(passive, SituationMeasure):
+                    if passive.duration is not None:
+                        ids.append(passive.duration.id)
+                    if passive.cooldown is not None:
+                        ids.append(passive.cooldown.id)
+            for resolution in self.resolutions.values():
+                for timer_condition in resolution.get_timer_conditions():
+                    ids.append(timer_condition.id)
+            if situation_manager is not None:
+                for check_key, threshold in situation_manager.threshold_checks.items():
+                    if getattr(threshold, "situation", None) is self and threshold.timed_release is not None:
+                        ids.append(check_key)
+            return ids
+
+        def pause(self, reason: str = "manual") -> bool:
+            """
+            Freeze an active situation without leaving ``active``.
+
+            Bars, thresholds, resolutions, measure durations, cooldowns, grace
+            timers, deadlines and situation pools stop; all tracked modifiers
+            (base wear, passive/measure modifiers) hibernate. Non-modifier effects
+            (game data) stay set. Already queued pending events still run.
+
+            A situation can be paused for several reasons at once; it only
+            continues once every reason is resumed.
+
+            Args:
+                reason (str): ``"manual"`` (default) or ``"flag"`` (set by the event flag sync).
+
+            Returns:
+                bool: True if this reason was added.
+            """
+            if self.state != "active" or reason in self.get_pause_reasons():
+                return False
+            was_paused = self.is_paused()
+            self.pause_reasons = self.get_pause_reasons() + [reason]
+            if not was_paused:
+                self.pause_started = Time("now")
+                lifecycle_registry.hibernate_category("situations", self.key, kind="modifier")
+            return True
+
+        def resume(self, reason: str = "manual") -> bool:
+            """
+            Drop one pause reason. When none is left the situation continues:
+            owned timers move forward by the paused time, the deadline offset
+            grows, modifiers wake up again.
+
+            Args:
+                reason (str): ``"manual"`` (default) or ``"flag"``.
+
+            Returns:
+                bool: True if this reason was removed (the situation may still
+                be paused for another reason).
+            """
+            if reason not in self.get_pause_reasons():
+                return False
+            self.pause_reasons = [r for r in self.get_pause_reasons() if r != reason]
+            if self.pause_reasons:
+                return True
+            elapsed = 0
+            if self.pause_started is not None:
+                elapsed = max(0, get_situation_time_index(Time("now")) - get_situation_time_index(self.pause_started))
+            if elapsed > 0:
+                for timer_id in self._owned_timer_ids():
+                    timer = get_timer(timer_id)
+                    if isinstance(timer, Time):
+                        shifted = Time(timer)
+                        shifted.add_time(daytime = elapsed)
+                        set_game_data("timer_" + timer_id, shifted)
+            self.paused_daytimes = self.get_paused_daytimes() + elapsed
+            self.pause_started = None
+            if self.state == "active":
+                lifecycle_registry.resume_category("situations", self.key, kind="modifier")
+                # base wear honours the resolution breather
+                for bar in self.bars.values():
+                    bar.sync_decrease_modifier()
+            return True
+
+        def _clear_pause(self):
+            """Drop the pause when the situation leaves ``active`` (the caller clears the hibernated entries)."""
+            self.pause_reasons = []
+            self.pause_started = None
+
+        def matches_current_flag(self) -> bool:
+            """Whether the current event flag lets this situation run (FlagCondition rules)."""
+            return check_flag_match(getattr(self, "flag", None), getattr(self, "flag_exclusive", True))
+
+        def sync_flag_pause(self) -> bool:
+            """
+            Pause (reason ``"flag"``) or continue the situation to match the
+            current event flag. A manual pause is left alone.
+
+            Returns:
+                bool: True if the flag pause changed.
+            """
+            if self.state != "active":
+                return False
+            if self.matches_current_flag():
+                return self.resume("flag")
+            return self.pause("flag")
+
+        # endregion
+        ################
+
+        def add_pictogram(self, pictogram: Pictogram | str):
+            pictogram_key = pictogram.key if isinstance(pictogram, Pictogram) else pictogram
+            if (
+                pictogram_manager is not None
+                and pictogram_manager.has_pictogram(pictogram_key)
+                and pictogram_key not in self.pictograms
+            ):
+                self.pictograms.append(pictogram_key)
+            return self
+
+        def get_pictogram_values(self) -> Dict[str, Any]:
+            return {
+                "visibility_state": self.visibility_state,
+                "active_passive": self.active_passive if self.active_passive else "",
+                "active_measure": self.active_measure if self.active_measure else "",
+                "combined_bar_value": self.get_combined_bar_value(),
+                "combined_bar_tendency": self.get_combined_bar_tendency(),
+                "combined_bar_area": self.get_combined_bar_value_area(),
+                "combined_bar_mood": self.get_combined_bar_value_mood(),
+            }
+
+        def get_combined_bar_value_area(self) -> int:
+            return get_bar_value_area(self.get_combined_bar_min(), self.get_combined_bar_max(), self.get_combined_bar_value())
+
+        def get_combined_bar_value_mood(self) -> str:
+            return get_bar_value_mood(
+                self.get_combined_bar_value_area(),
+                self.get_combined_bar_min(),
+                self.get_combined_bar_max(),
+            )
+
+        def get_pictogram_data(self) -> Dict[str, Dict[str, Any]]:
+            output = {}
+
+            for bar in self.bars.values():
+                update_dict(output, bar.get_pictogram_data())
+
+            if pictogram_manager is None:
+                return output
+
+            for pictogram in self.pictograms:
+                values = self.get_pictogram_values()
+                pictogram_label = pictogram_manager.get_label(pictogram, **values)
+                pictogram_tooltip = pictogram_manager.get_tooltip(pictogram, **values)
+                pictogram_icon = pictogram_manager.get_icon(pictogram, **values)
+                if pictogram_icon is not None:
+                    output[self.key + ":" + pictogram] = {
+                        "key": pictogram,
+                        "label": pictogram_label,
+                        "tooltip": pictogram_tooltip,
+                        "icon": pictogram_icon,
+                    }
+            return output
+
+        def set_bar_weights(self, weights: Dict[str, float]):
+            # Normalize weights so that their sum is 1.0
+            total = sum(weights.values())
+            if total != 0:
+                for key in weights:
+                    weights[key] = weights[key] / total
+            self.bar_weights = weights
+            return self
+   
+        def add_comments(self, *comments: str):
+            self.comments.extend(comments)
+            return self
+
+        def add_description(self, description: SituationDescription):
+            self.descriptions.append(description)
+            return self
+
+        def add_threshold(self, threshold: SituationThreshold):
+            threshold.situation = self
+            self.thresholds[threshold.key] = threshold
+            return self
+
+        def add_deadline(self, deadline: Time):
+            self.deadline = deadline
+            return self
+
+        def add_resolution(self, resolution: SituationResolution):
+            resolution.bind_situation(self)
+            self.resolutions[resolution.key] = resolution
+            return self
+
+        def should_block_negative_delta(self) -> bool:
+            """True while positive resolution is reached and delta_lock is enabled."""
+            resolution = self.resolutions.get("positive_resolution")
+            if resolution is None or not isinstance(resolution, SituationPositiveResolution):
+                return False
+            return resolution.delta_lock and resolution.is_reached()
+
+        def check_resolutions(self, **kwargs) -> bool:
+            """
+            Evaluate all resolutions (reach + grace/gates). Stops after first fire.
+
+            Returns:
+                bool: True if a resolution fired and the situation completed.
+            """
+            if not self.is_running():
+                return False
+            for resolution in self.resolutions.values():
+                if resolution.evaluate(**kwargs):
+                    return True
+            return False
+
+        def try_resolution(self, key: str, **kwargs) -> bool:
+            """Evaluate a single named resolution."""
+            if not self.is_running() or key not in self.resolutions:
+                return False
+            return self.resolutions[key].evaluate(**kwargs)
+
+        def apply_progress_change(self, key: str, value: float):
+            """
+            Direct bar push. No-op until this situation is active.
+
+            Args:
+                key (str): Bar key, or ``ALL`` to fan out to every bar.
+                value (float): Delta to apply.
+            """
+            if not self.is_running():
+                return
+            self.change_bar_value(key, value)
+
+        def load_thumbnail(self, **kwargs):
+            if not self.thumbnail:
+                return None
+            refined_thumbnail = refine_image(self.thumbnail, **kwargs)
+            if refined_thumbnail is not None:
+                return refined_thumbnail
+            return None
+
+        def get_current_thumbnail(self, **kwargs):
+            thumbnail_out = self.load_thumbnail()
+            combined = self.get_combined_bar_value()
+            closest = None
+            closest_dist = None
+            for threshold in self.thresholds.values():
+                if threshold.thumbnail is None:
+                    continue
+                pos = self.get_combined_threshold_value(threshold)
+                dist = abs(pos - combined)
+                if closest_dist is None or dist < closest_dist:
+                    closest = threshold
+                    closest_dist = dist
+            if closest is not None:
+                closest_thumbnail = closest.load_thumbnail(**kwargs)
+                if closest_thumbnail is not None:
+                    thumbnail_out = closest_thumbnail
+            if thumbnail_out == None:
+                thumbnail_out = "images/journal/empty_image.webp"
+            return thumbnail_out
+
+        def get_descriptions(self, **kwargs):
+            descriptions_out = []
+            for description in self.descriptions:
+                descriptions_out.extend(description.get_description(**kwargs))
+            return descriptions_out
+
+        ##################
+        # region Teasers #
+
+        def add_teaser(self, teaser: SituationTeaser):
+            teaser.situation = self
+            self.teasers[teaser.key] = teaser
+            return self
+
+        def check_teasers(self, **kwargs):
+            for teaser in self.teasers.values():
+                if teaser.active:
+                    continue
+                if teaser.check_conditions(**kwargs):
+                    teaser.activate(**kwargs)
+            return self
+
+        def get_active_teasers(self):
+            return sorted([teaser for teaser in self.teasers.values() if teaser.active], key=lambda x: x.activation_order)
+
+        # endregion
+        ##################
+
+        ################
+        # region Pools #
+
+        def check_pool(self, pool_key: str, **kwargs):
+            if not self.is_running():
+                return False
+            if pool_key not in self.event_pools.keys():
+                return False
+            return self.event_pools[pool_key].check_pool()
+
+        def add_event_pool(self, event_pool: SituationEventPools):
+            event_pool.situation = self
+            self.event_pools[event_pool.key] = event_pool
+            return self
+
+        # endregion
+        ################
+
+        ####################
+        # region Passsives #
+
+        def add_passive(self, passive: SituationPassive):
+            passive.bind_situation(self)
+            self.passives[passive.name] = passive
+            return self
+
+        def set_passive(self, passive_key: str, skip_clear: bool = False):
+            """
+            Activate a lasting passive. Replaces any previously active passive.
+            Selecting the already-active passive deactivates it (toggle off).
+            Does not touch the active measure slot.
+
+            Args:
+                passive_key (str): Key/name of the passive to activate.
+                skip_clear (bool): If True, skip deactivate of the previous passive
+                    and do not toggle off when re-selecting the same key.
+
+            Returns:
+                bool: True if the passive was activated or toggled off.
+            """
+            if passive_key not in self.passives:
+                return False
+            if self.is_paused() and not skip_clear:
+                return False
+            target = self.passives[passive_key]
+            if target.type == "measure":
+                return self.set_measure(passive_key, skip_clear=skip_clear)
+
+            # Re-select active passive → deactivate (player toggle)
+            if not skip_clear and self.active_passive == passive_key and target.active:
+                target.deactivate()
+                target.detach_effects()
+                self.active_passive = None
+                return True
+
+            if not skip_clear and self.active_passive in self.passives:
+                previous = self.passives[self.active_passive]
+                previous.deactivate()
+                previous.detach_effects()
+
+            self.active_passive = passive_key
+            target.activate()
+            return True
+
+        def set_measure(self, measure_key: str, skip_clear: bool = False):
+            """
+            Activate a temporary measure. Does not touch the active passive slot.
+            A new measure cannot be started while another is still active; wait for
+            duration expiry. Instant measures (``duration is None``, not
+            ``open_ended``) free the slot immediately after apply.
+
+            Args:
+                measure_key (str): Key/name of the measure to activate.
+                skip_clear (bool): If True, skip availability checks and re-apply only
+                    lasting effects (no instant/counter/timer side effects).
+
+            Returns:
+                bool: True if the measure was activated.
+            """
+            if measure_key not in self.passives:
+                return False
+            if self.is_paused() and not skip_clear:
+                return False
+            target = self.passives[measure_key]
+            if target.type != "measure":
+                return False
+
+            if skip_clear:
+                self.active_measure = measure_key
+                target.active = True
+                target.run_effects()
+                return True
+
+            # Block replacement — only duration expiry (deactivate) frees the slot
+            if self.active_measure is not None:
+                return False
+
+            if not target.check_available():
+                return False
+
+            self.active_measure = measure_key
+            target.activate()
+            return True
+
+        def get_passives(self, type: str = None):
+            if type is not None:
+                return sorted([passive for passive in self.passives.values() if passive.type == type], key=lambda x: x.name)
+            return sorted([passive for passive in self.passives.values()], key=lambda x: x.name)
+
+        def get_passive(self, key: str):
+            if key not in self.passives.keys():
+                if self.active_passive is None:
+                    return None
+                return self.passives.get(self.active_passive)
+            return self.passives[key]
+
+        def get_measure(self, key: str = None):
+            if key is None:
+                if self.active_measure is None:
+                    return None
+                return self.passives.get(self.active_measure)
+            return self.passives.get(key)
+
+        def check_passives(self, **kwargs):
+            if not self.is_running():
+                return
+            if self.active_passive in self.passives:
+                self.passives[self.active_passive].check(**kwargs)
+            if self.active_measure in self.passives:
+                self.passives[self.active_measure].check(**kwargs)
+        
+        def track_modifier(self, key: str, stat: str, collection: str, op: str = "+", value=0):
+            """
+            Record a modifier owned by this situation in the global lifecycle registry.
+
+            Args:
+                key (str): Modifier key.
+                stat (str): Stat the modifier applies to.
+                collection (str): Modifier collection name.
+                op (str): Modifier operation (+, *, value_percent, range_percent, gated_percent).
+                value: Modifier value (needed for hibernate resume).
+            """
+            lifecycle_registry.track(
+                key,
+                owner="situations",
+                category=self.key,
+                kind="modifier",
+                stat=stat,
+                collection=collection,
+                op=op,
+                value=value,
+            )
+
+        def untrack_and_remove(self, key: str):
+            """
+            Remove a tracked modifier from the global modifier system and registry.
+
+            Args:
+                key (str): Modifier key.
+            """
+            lifecycle_registry.ping(key, REMOVE)
+
+        def clear_tracked_modifiers(self):
+            """Remove all modifiers tracked by this situation."""
+            lifecycle_registry.clear(owner="situations", category=self.key)
+
+
+
+        # endregion
+        ####################
+
+        ################
+        # region Holds #
+
+        def add_threshold_hold(self, threshold: SituationThreshold, hold: int):
+            self.threshold_holds[threshold.key] = hold
+            return self
+
+        def release_threshold_hold(self, threshold_key: str):
+            if threshold_key not in self.threshold_holds.keys():
+                return
+            del self.threshold_holds[threshold_key]
+            return self
+
+        def check_threshold_holds(self):
+            for threshold_key in list(self.threshold_holds.keys()):
+                threshold = self.thresholds[threshold_key]
+                for bar_key in threshold.bounds.keys():
+                    bar = self.bars[bar_key]
+                    if not bar.check_threshold_hold(threshold):
+                        break
+                else:
+                    threshold.release_hold()
+
+        # endregion
+        ################
+
+        ###############
+        # region Bars #
+
+        def get_bar_weights(self):
+            if self.bar_weights == None:
+                bars_amount = len(self.bars.keys())
+                return {key: 1 / bars_amount for key in self.bars.keys()}
+            return self.bar_weights
+
+        def get_combined_bar_min(self) -> float:
+            output = 0.0
+            weights = self.get_bar_weights()
+            for key, bar in self.bars.items():
+                output += bar.min * weights[key]
+            return output
+
+        def get_combined_bar_max(self) -> float:
+            output = 0.0
+            weights = self.get_bar_weights()
+            for key, bar in self.bars.items():
+                output += bar.max * weights[key]
+            return output
+
+        def get_combined_bar_value(self) -> float:
+            output = 0.0
+            weights = self.get_bar_weights()
+            for key, bar in self.bars.items():
+                output += bar.value * weights[key]
+            return output
+
+        def change_bar_value(self, bar_key: str, delta: float):
+            if not self.is_running():
+                return
+            if bar_key == "ALL":
+                for bar in self.bars.values():
+                    bar.change_value(delta)
+                return
+            if bar_key not in self.bars.keys():
+                return
+            self.bars[bar_key].change_value(delta)
+
+            self.check_threshold_holds()
+
+        def get_full_bar_range(self, bar_key: str):
+            if bar_key == "ALL":
+                return {bar.key: bar.get_full_range() for bar in self.bars.values()}
+            if bar_key not in self.bars.keys():
+                return
+            return {bar_key: bar.get_full_range()}
+
+        def get_gated_bar_range(self, bar_key: str, modifier_value: float):
+            if bar_key == "ALL":
+                return {bar.key: bar.get_gated_range(modifier_value) for bar in self.bars.values()}
+            if bar_key not in self.bars.keys():
+                return
+            return {bar_key: bar.get_gated_range(modifier_value)}
+
+        def get_combined_bar_tendency_value(self) -> float:
+            """
+            Weighted combined tendency from each bar's last-five-change average.
+
+            Returns:
+                float: Signed tendency in bar units. 0.0 when there is no history.
+            """
+            output = 0.0
+            weights = self.get_bar_weights()
+            for key, bar in self.bars.items():
+                output += bar.tendency * weights[key]
+            return output
+
+        def get_combined_bar_tendency(self) -> int:
+            """
+            Direction of the weighted combined bar from recent changes.
+
+            Returns:
+                int: 1 if positive, -1 if negative, 0 if neutral / no history.
+            """
+            output = self.get_combined_bar_tendency_value()
+            if output > 0:
+                return 1
+            if output < 0:
+                return -1
+            return 0
+
+        def change_bar_values_via_stats(self, key: str, delta: float):
+            if not self.is_running():
+                return
+            for bar in self.bars.values():
+                bar.change_value_via_stats(key, delta)
+
+            self.check_threshold_holds()
+
+        def add_bar(self, bar: SituationBar):
+            bar.situation = self
+            self.bars[bar.key] = bar
+            return self
+
+        def get_bar(self, key: str):
+            if key not in self.bars.keys():
+                return None
+            return self.bars[key]
+
+        def get_bars(self):
+            return self.bars.values()
+
+        def add_start_modifier(self, bar_key: str, modifier: Modifier_Obj | SituationStartModifier, stat: str = None):
+            """
+            Add an authored start modifier to a bar (validated on registration).
+
+            Args:
+                bar_key (str): Target bar key.
+                modifier (Modifier_Obj | SituationStartModifier): Operator/value payload.
+                stat (str, optional): School-stat key for snapshot contribution.
+
+            Returns:
+                bool: True if stored on the bar.
+            """
+            bar = self.get_bar(bar_key)
+            if bar is None:
+                log(f"Cannot add start modifier: bar '{bar_key}' not found on situation '{self.key}'.", log_type="error", category="situation")
+                return False
+            return bar.add_start_modifier(modifier, stat)
+
+        def shift_start_value(self, bar_key: str, op: str, value: float, name: str = None, stat: str = None):
+            """
+            Runtime start-value shift (events before activation). Survives definition sync.
+            Builds the Modifier_Obj internally and validates at registration time.
+
+            Args:
+                bar_key (str): Target bar key.
+                op (str): ``+``, ``*``, ``value_percent``, ``range_percent`` or ``gated_percent``.
+                value (float): Operand (flat, factor, percent, or stat weight).
+                name (str, optional): Modifier identity. Auto-generated if omitted.
+                stat (str, optional): School-stat key for snapshot contribution.
+
+            Returns:
+                bool: True if the bar existed and the shift was stored.
+            """
+            bar = self.get_bar(bar_key)
+            if bar is None:
+                log(f"Cannot shift start value: bar '{bar_key}' not found on situation '{self.key}'.", log_type="error", category="situation")
+                return False
+            return bar.add_start_shift(op, value, name=name, stat=stat)
+
+        # endregion
+        ###############
+
+        #####################
+        # region Thresholds #
+
+        def get_combined_threshold_value(self, threshold: SituationThreshold):
+            output = 0.0
+            weights = self.get_bar_weights()
+            for key, bar in self.bars.items():
+                if key in threshold.bounds.keys():
+                    output += threshold.bounds[key] * weights[key]
+                else:
+                    output += bar.value * weights[key]
+            return output
+
+        def get_next_blocking_thresholds(self, direction: float, include_reached: bool = False):
+            output = {key: None for key in self.bars.keys()}
+            for threshold in self.thresholds.values():
+                if (not include_reached and threshold.reached) or \
+                    (threshold.hold != -1) or \
+                    not threshold.is_blocking():
+                    continue
+                for key, value in threshold.bounds.items():
+                    bar_value = self.bars[key].value
+                    if direction > 0 and value > bar_value and (output[key] == None or output[key].bounds[key] > value):
+                        output[key] = threshold
+                    elif direction < 0 and value < bar_value and (output[key] == None or output[key].bounds[key] < value):
+                        output[key] = threshold
+
+            return output
+
+        def get_closest_next_blocking_threshold(self, origin: float, direction: float, include_reached: bool = False):
+            thresholds = self.get_next_blocking_thresholds(direction, include_reached)
+            if len(thresholds.keys()) == 0:
+                return None
+            # Get the threshold (blocking) with a combined value closest to origin,
+            # on the side given by direction.
+            closest_threshold = None
+            closest_dist = None
+            for threshold in self.thresholds.values():
+                if threshold.reached or \
+                    threshold.hold != -1 or \
+                    not threshold.is_blocking():
+                    continue
+                combined_value = self.get_combined_threshold_value(threshold)
+                # Only gates on the requested side; a gate the bar is clamped
+                # at counts for both sides (journal draws it as closed).
+                if (direction > 0 and combined_value < origin) or (direction < 0 and combined_value > origin):
+                    continue
+                dist = abs(combined_value - origin)
+                if closest_threshold is None or dist < closest_dist:
+                    closest_threshold = threshold
+                    closest_dist = dist
+            return closest_threshold
+   
+
+        def get_thresholds_in_range(self, origin: float, bar_key: str, range: float, direction: float, stop_at_blocking: bool = True, include_auto: bool = True, include_reached: bool = False):
+            blocking = None
+            output = []
+            thresholds = sorted(
+                (t for t in self.thresholds.values() if bar_key in t.bounds),
+                key=lambda t: t.bounds[bar_key],
+                reverse=(direction < 0),
+            )
+       
+            for threshold in thresholds:
+                if (not include_auto and not threshold.is_blocking()) or \
+                    (direction * threshold.direction <= 0) or \
+                    (not include_reached and threshold.reached) or \
+                    (threshold.hold != -1):
+                    continue
+
+                bound = threshold.bounds[bar_key]
+                if (direction > 0 and bound < origin) or (direction < 0 and bound > origin):
+                    continue
+
+                if (direction > 0 and bound > origin + range) or (direction < 0 and bound < origin - range):
+                    break
+
+                output.append(threshold)
+
+                if stop_at_blocking and threshold.is_blocking():
+                    blocking = threshold
+                    break
+                
+            return output, blocking
+
+        def get_thresholds_in_direction_for_all_bars(
+            self,
+            direction: int,
+            stop_at_blocking: bool = True,
+            include_auto: bool = True,
+            include_reached: bool = False,
+        ):
+            """
+            Unique thresholds ahead in the given direction for every bar.
+
+            Collects per bar up to the next blocking threshold (inclusive), then
+            sorts by distance of each threshold's combined value to the combined
+            bar value (closest first).
+
+            Args:
+                direction (int): Search direction, 1 or -1.
+                stop_at_blocking (bool): Stop at the first blocking threshold per bar.
+                include_auto (bool): Include auto-fire thresholds.
+                include_reached (bool): Include already reached thresholds.
+
+            Returns:
+                list: Unique SituationThresholds, closest combined value first.
+            """
+            thresholds_set = set()
+            for bar_key, bar in self.bars.items():
+                origin = bar.value
+                thresholds_sorted = sorted(
+                    (t for t in self.thresholds.values() if bar_key in t.bounds),
+                    key=lambda t: t.bounds[bar_key],
+                    reverse=(direction < 0),
+                )
+
+                for threshold in thresholds_sorted:
+                    if (not include_auto and not threshold.is_blocking()) or \
+                        (direction * threshold.direction <= 0) or \
+                        (not include_reached and threshold.reached) or \
+                        (threshold.hold != -1):
+                        continue
+
+                    bound = threshold.bounds[bar_key]
+                    if (direction > 0 and bound < origin) or (direction < 0 and bound > origin):
+                        continue
+
+                    thresholds_set.add(threshold)
+
+                    if stop_at_blocking and threshold.is_blocking():
+                        break
+
+            combined = self.get_combined_bar_value()
+            return sorted(
+                thresholds_set,
+                key=lambda t: abs(self.get_combined_threshold_value(t) - combined),
+            )
+
+        def get_hints(self):
+            """
+            Journal hint texts for the current bar tendency.
+
+            Uses positive direction when tendency is neutral. For each threshold,
+            shows threshold_hint when bar values are reached, otherwise approach_hint.
+
+            Returns:
+                list: Hint strings, closest combined threshold first. Empty hints omitted.
+            """
+            direction = self.get_combined_bar_tendency()
+            if direction == 0:
+                direction = 1
+
+            hints = []
+            for threshold in self.get_thresholds_in_direction_for_all_bars(direction):
+                if threshold.is_bar_values_reached():
+                    hint = threshold.threshold_hint
+                else:
+                    hint = threshold.approach_hint
+                if hint:
+                    hints.append(hint)
+            return hints
+
+        def is_threshold_reached(self, threshold_key: str):
+            threshold = self.thresholds.get(threshold_key)
+            if threshold is None:
+                threshold = self.thresholds.get("situation:" + self.key + ":" + threshold_key)
+            if threshold is None:
+                return False
+            return threshold.is_reached()
+
+        # endregion
+        #####################
+
+    #endregion
+    ####################
+
+    ###########################
+    # region SituationManager #
+
+    class SituationManager:
+        def __init__(self):
+            self._situations = {}
+            self.threshold_checks = {}
+            # Rules: ("situation", key|"*"), ("stat", key|"*"), ("pair", situation, stat)
+            self._progress_blocks = set()
+            self._loaded_this_wave = set()
+            # Cascading resolution breather (pauses base wear after negative resolve)
+            self.resolution_breather_days = 0
+            self.resolution_breather_active = False
+            # Event effects queued by resolutions/thresholds (see Pending Events)
+            self.pending_events = []
+
+        def begin_situation_load_wave(self):
+            """
+            Clear the per-wave registration set before definitions load.
+
+            Safe for old saves that lack ``_loaded_this_wave``.
+            """
+            self._loaded_this_wave = set()
+
+        def _ensure_loaded_this_wave(self):
+            if not hasattr(self, "_loaded_this_wave") or self._loaded_this_wave is None:
+                self._loaded_this_wave = set()
+
+        def load_situation(self, situation: Situation):
+            """
+            Insert or sync a situation definition for this load wave.
+
+            Revive order when previously invalid: update_data → uninvalidate →
+            resume_category → re-announce pending threshold checks.
+            """
+            self._ensure_loaded_this_wave()
+            self._loaded_this_wave.add(situation.key)
+
+            live = self._situations.get(situation.key)
+            was_invalid = bool(live is not None and getattr(live, "invalid", False))
+
+            if live is not None:
+                live.update_data(situation)
+            else:
+                self._situations[situation.key] = situation
+                live = situation
+
+            error_messages = live.run_self_test()
+            if len(error_messages) > 0:
+                for error_message in error_messages:
+                    log(error_message[1], log_type="error", category="situation")
+                self.invalidate_situation(live)
+                return self
+
+            if was_invalid:
+                self.uninvalidate_situation(live)
+                lifecycle_registry.resume_category("situations", live.key)
+                if live.is_paused():
+                    # revived from invalid while paused: modifiers stay asleep
+                    lifecycle_registry.hibernate_category("situations", live.key, kind="modifier")
+
+            self._reannounce_threshold_checks(live.key)
+            return self
+
+        def _reannounce_threshold_checks(self, situation_key: str):
+            """
+            Re-track pending threshold checks for a live situation in this wave.
+
+            Keeps ACTIVE entries pinged so finalize_check does not sweep them.
+            Does not restart timers (unlike hibernate→resume).
+
+            A check whose threshold no longer exists in the reloaded definition
+            (threshold removed on a live reload) is dropped instead of kept alive,
+            mirroring the resume path (_resume_resource → REMOVE).
+            """
+            situation = self._situations.get(situation_key)
+            prefix = "situation:" + situation_key + ":"
+            for check_key, threshold in list(self.threshold_checks.items()):
+                belongs = False
+                if getattr(threshold, "situation", None) is not None and threshold.situation.key == situation_key:
+                    belongs = True
+                elif check_key.startswith(prefix):
+                    belongs = True
+                if not belongs:
+                    continue
+                if situation is None or check_key not in situation.thresholds:
+                    del self.threshold_checks[check_key]
+                    remove_timer(check_key)
+                    lifecycle_registry.ping(check_key, REMOVE)
+                    continue
+                lifecycle_registry.track(
+                    check_key,
+                    "situations",
+                    situation_key,
+                    "threshold_check",
+                )
+
+        def invalidate_situation(self, situation: Situation):
+            self._situations[situation.key].invalid = True
+            # Keep modifiers / threshold_check meta while definition is temporarily broken.
+            lifecycle_registry.hibernate_category("situations", situation.key)
+
+        def uninvalidate_situation(self, situation: Situation):
+            self._situations[situation.key].invalid = False
+
+        def reconcile_orphan_situations(self):
+            """
+            Soft-invalidate situations present in the save but not re-registered
+            in this load wave. Preserves runtime state for a possible definition return.
+            """
+            if situation_manager is None:
+                return
+            self._ensure_loaded_this_wave()
+            loaded = self._loaded_this_wave
+            for key in list(self._situations.keys()):
+                if key in loaded:
+                    continue
+                situation = self._situations[key]
+                log(
+                    f"Situation '{key}' has no definition in this load wave "
+                    f"(mod removed/deactivated or key renamed) → invalidated, "
+                    f"save state kept for possible return.",
+                    log_type="info",
+                    category="situation",
+                )
+                self.invalidate_situation(situation)
+
+                # Legacy threshold_checks without registry entries.
+                prefix = "situation:" + key + ":"
+                for check_key, threshold in list(self.threshold_checks.items()):
+                    belongs = False
+                    if getattr(threshold, "situation", None) is not None and threshold.situation.key == key:
+                        belongs = True
+                    elif check_key.startswith(prefix):
+                        belongs = True
+                    if belongs and not lifecycle_registry.has(check_key):
+                        del self.threshold_checks[check_key]
+                        remove_timer(check_key)
+
+                # Drop progress blocks referencing this situation.
+                to_drop = set()
+                for rule in self._progress_blocks:
+                    if len(rule) >= 2 and rule[0] == "situation" and rule[1] == key:
+                        to_drop.add(rule)
+                    elif len(rule) >= 2 and rule[0] == "pair" and rule[1] == key:
+                        to_drop.add(rule)
+                self._progress_blocks.difference_update(to_drop)
+
+                proposal = get_game_data("voteProposal")
+                if proposal is situation or (getattr(proposal, "key", None) == key):
+                    if isinstance(proposal, Unlockable):
+                        proposal.release_vote_money()
+                    set_game_data("voteProposal", None)
+
+        def get_pictogram_data(self, situation_key: str) -> Dict[str, Dict[str, Any]]:
+            situation = self.get_situation(situation_key)
+            if situation is None:
+                return {}
+            return situation.get_pictogram_data()
+
+        def add_pictogram(self, situation_key: str, pictogram: Pictogram | str):
+            situation = self.get_situation(situation_key)
+            if situation is None:
+                return
+            if isinstance(pictogram, str):
+                pictogram = pictogram_manager.get_pictogram(pictogram)
+            if pictogram is None:
+                return
+            situation.add_pictogram(pictogram)
+            return
+
+        def get_situations(self, include_invalid: bool = False):
+            if include_invalid:
+                return list(self._situations.values())
+            return [situation for situation in self._situations.values() if not situation.invalid]
+
+        def get_situation(self, key: str):
+            if key not in self._situations.keys() or self._situations[key].invalid:
+                return None
+            return self._situations[key]
+
+        def get_completed_situations(self):
+            return [situation for situation in self._situations.values() if situation.state == "completed" and not situation.invalid]
+
+        def get_visible_situations(self, include_completed: bool = False):
+            return [situation for situation in self._situations.values() if (situation.visible or (include_completed and situation.state == "completed")) and not situation.invalid]
+
+        def get_visible_teaser_titles(self, *situations: Situation, tab: str = ""):
+            out = []
+            for situation in situations:
+                key = situation.key
+                if tab != "":
+                    key = f"{key}:{tab}"
+                if situation.visibility_state == "active" or situation.state == "completed":
+                    out.append((situation.name, key))
+                elif situation.visibility_state == "teaser_active":
+                    out.append(("????????", key))
+            return out
+
+        def get_active_situations(self):
+            """
+            Live situations currently in the active state.
+
+            Returns:
+                list[Situation]: Non-invalid situations with state ``active``.
+            """
+            return [
+                situation
+                for situation in self.get_situations()
+                if situation.state == "active"
+            ]
+
+        def count_active_situations(self) -> int:
+            """
+            Count live situations currently in the active state.
+
+            Returns:
+                int: Number of non-invalid situations with state ``active``.
+            """
+            return len([situation for situation in self.get_active_situations() if situation.is_running()])
+
+        def is_resolution_breather_active(self) -> bool:
+            """
+            Whether base wear is paused after a negative resolution.
+
+            Returns:
+                bool: True while the cascading resolution breather is active.
+            """
+            return bool(getattr(self, "resolution_breather_active", False))
+
+        def get_resolution_breather_display_days(self) -> int:
+            """
+            Remaining breather duration for journal display.
+
+            While the counter is positive, return it. On the final inclusive day
+            (active but counter already 0) return 1 so the UI still shows one day.
+
+            Returns:
+                int: Days remaining to show, or 0 when inactive.
+            """
+            if not self.is_resolution_breather_active():
+                return 0
+            days = getattr(self, "resolution_breather_days", 0) or 0
+            return days if days > 0 else 1
+
+        def trigger_resolution_breather(self):
+            """
+            Start or refresh the cascading resolution breather.
+
+            Duration is ``min(4, remaining active situations)`` after the failed
+            situation has already completed. Extension uses max, never sum.
+            """
+            new_days = min(4, self.count_active_situations())
+            if new_days <= 0:
+                return
+
+            was_active = self.is_resolution_breather_active()
+            old_days = getattr(self, "resolution_breather_days", 0) or 0
+            self.resolution_breather_days = max(old_days, new_days)
+            self.resolution_breather_active = True
+            if not was_active:
+                self._suspend_all_decrease_modifiers()
+
+        def tick_resolution_breather(self):
+            """
+            Advance the breather on day-change (check before decrement).
+
+            If the counter is still positive, the pause continues and the counter
+            decrements. If it is already 0 while active, the pause ends and base
+            wear resumes. Daytime-change must not call this.
+            """
+            if not self.is_resolution_breather_active():
+                return
+
+            days = getattr(self, "resolution_breather_days", 0) or 0
+            if days > 0:
+                self.resolution_breather_days = days - 1
+            else:
+                self.resolution_breather_active = False
+                self.resolution_breather_days = 0
+                self._resume_all_decrease_modifiers()
+
+        def _suspend_all_decrease_modifiers(self):
+            """Remove base-wear decrease modifiers from all active situation bars."""
+            for situation in self.get_situations():
+                if not situation.is_running():
+                    continue
+                for bar in situation.bars.values():
+                    bar.revert_decrease_modifier()
+
+        def _resume_all_decrease_modifiers(self):
+            """Re-apply base-wear decrease modifiers on all active situation bars."""
+            for situation in self.get_situations():
+                if not situation.is_running():
+                    continue
+                for bar in situation.bars.values():
+                    bar.apply_decrease_modifier()
+
+        def pause_situation(self, key: str, reason: str = "manual") -> bool:
+            """
+            Pause an active situation (see ``Situation.pause``).
+
+            Args:
+                key (str): Situation key.
+                reason (str): Pause reason, ``"manual"`` by default.
+
+            Returns:
+                bool: True if it was paused.
+            """
+            situation = self.get_situation(key)
+            if situation is None:
+                log(f"pause_situation: unknown situation '{key}'", log_type="error", category="situation")
+                return False
+            return situation.pause(reason)
+
+        def resume_situation(self, key: str, reason: str = "manual") -> bool:
+            """
+            Resume a paused situation (see ``Situation.resume``).
+
+            Args:
+                key (str): Situation key.
+                reason (str): Pause reason to drop, ``"manual"`` by default.
+
+            Returns:
+                bool: True if it was resumed.
+            """
+            situation = self.get_situation(key)
+            if situation is None:
+                log(f"resume_situation: unknown situation '{key}'", log_type="error", category="situation")
+                return False
+            return situation.resume(reason)
+
+        def sync_flag_pauses(self):
+            """
+            Pause or continue every active situation to match the current event
+            flag. Called by ``set_current_flag`` and after loading.
+            """
+            for situation in self.get_active_situations():
+                situation.sync_flag_pause()
+
+        def get_paused_situations(self):
+            """
+            Active situations that are currently paused.
+
+            Returns:
+                list[Situation]: Paused, non-invalid situations.
+            """
+            return [situation for situation in self.get_active_situations() if situation.is_paused()]
+
+        def check_pool(self, situation_key: str, pool_key: str, **kwargs):
+            situation = self.get_situation(situation_key)
+            if situation is None:
+                return False
+            return situation.check_pool(pool_key, **kwargs)
+
+        def check_passives(self, **kwargs):
+            for situation in self.get_situations():
+                situation.check_passives(**kwargs)
+
+        def check_teasers(self, **kwargs):
+            """
+            Evaluate Chronicle Teasers for all situations.
+
+            The event system always passes `event_name` context into end-of-event
+            checks. For teaser conditions that reference *specific* event keys,
+            we must evaluate them against the teaser's own event_name parameter,
+            not against the currently evaluated event.
+            """
+            teaser_kwargs = dict(kwargs)
+            teaser_kwargs.pop("event_name", None)
+            for situation in self.get_situations():
+                situation.check_teasers(**teaser_kwargs)
+
+        def check_resolutions(self, **kwargs):
+            for situation in self.get_situations():
+                if not situation.is_running():
+                    continue
+                if situation.check_resolutions(**kwargs):
+                    return True
+            return False
+
+        def shift_start_value(self, situation_key: str, bar_key: str, op: str, value: float, name: str = None, stat: str = None):
+            """
+            Runtime start-value shift for a not-yet-resolved bar snapshot.
+            Builds the Modifier_Obj internally.
+
+            Args:
+                situation_key (str): Situation key.
+                bar_key (str): Bar key within the situation.
+                op (str): ``+``, ``*``, ``value_percent``, ``range_percent`` or ``gated_percent``.
+                value (float): Operand (flat, factor, percent, or stat weight).
+                name (str, optional): Modifier identity. Auto-generated if omitted.
+                stat (str, optional): School-stat key for snapshot contribution.
+
+            Returns:
+                bool: True if stored on the bar.
+            """
+            situation = self.get_situation(situation_key)
+            if situation is None:
+                log(f"Cannot shift start value: situation '{situation_key}' not found.", log_type="error", category="situation")
+                return False
+            return situation.shift_start_value(bar_key, op, value, name=name, stat=stat)
+
+        ###########################
+        # region Progress Blocker #
+
+        def _normalize_progress_keys(self, value):
+            """
+            Normalize block/unblock keys to a list of strings.
+
+            Args:
+                value: None, \"all\", a key string, or a list/tuple of keys.
+
+            Returns:
+                list: Normalized keys, or empty list if value is None.
+            """
+            if value is None:
+                return []
+            if isinstance(value, (list, tuple, set)):
+                return [("*" if str(v) == "all" else str(v)) for v in value]
+            if value == "all":
+                return ["*"]
+            return [str(value)]
+
+        def _progress_block_rules(self, situations=None, stats=None):
+            """
+            Build the rule tuples for the given situation/stat filters.
+
+            Args:
+                situations: None, \"all\", str, or list — situation keys to filter.
+                stats: None, \"all\", str, or list — stat keys to filter.
+
+            Returns:
+                set: Rule tuples to add or remove.
+            """
+            situation_keys = self._normalize_progress_keys(situations)
+            stat_keys = self._normalize_progress_keys(stats)
+            rules = set()
+
+            if situation_keys and stat_keys:
+                for situation_key in situation_keys:
+                    for stat_key in stat_keys:
+                        rules.add(("pair", situation_key, stat_key))
+            elif situation_keys:
+                for situation_key in situation_keys:
+                    rules.add(("situation", situation_key))
+            elif stat_keys:
+                for stat_key in stat_keys:
+                    rules.add(("stat", stat_key))
+
+            return rules
+
+        def block_progress(self, situations=None, stats=None):
+            """
+            Add progress-exclude rules for stat→bar auto updates.
+
+            Only situations / only stats → block that axis.
+            Both → block each situation|stat pair.
+            Use \"all\" to block every entry on that axis.
+
+            Args:
+                situations: None, \"all\", str, or list of situation keys.
+                stats: None, \"all\", str, or list of stat keys.
+
+            Returns:
+                SituationManager: self for chaining.
+            """
+            self._progress_blocks.update(self._progress_block_rules(situations, stats))
+            return self
+
+        def unblock_progress(self, situations=None, stats=None):
+            """
+            Remove matching progress-exclude rules. Other rules stay active.
+
+            Args must mirror the block that should be removed.
+
+            Args:
+                situations: None, \"all\", str, or list of situation keys.
+                stats: None, \"all\", str, or list of stat keys.
+
+            Returns:
+                SituationManager: self for chaining.
+            """
+            self._progress_blocks.difference_update(self._progress_block_rules(situations, stats))
+            return self
+
+        def clear_progress_blocks(self):
+            """
+            Remove all progress-exclude rules (e.g. at end_event).
+
+            Returns:
+                SituationManager: self for chaining.
+            """
+            self._progress_blocks.clear()
+            return self
+
+        def is_progress_blocked(self, situation_key: str, stat_key: str) -> bool:
+            """
+            Check whether auto progress is blocked for a situation and stat.
+
+            Args:
+                situation_key (str): Situation key.
+                stat_key (str): Stat type key.
+
+            Returns:
+                bool: True if the auto update should be skipped.
+            """
+            blocks = self._progress_blocks
+            if ("situation", "*") in blocks or ("situation", situation_key) in blocks:
+                return True
+            if ("stat", "*") in blocks or ("stat", stat_key) in blocks:
+                return True
+            if ("pair", "*", "*") in blocks or ("pair", situation_key, "*") in blocks:
+                return True
+            if ("pair", "*", stat_key) in blocks or ("pair", situation_key, stat_key) in blocks:
+                return True
+            return False
+
+        # endregion
+        ###########################
+
+        ##########################
+        # region Progress Change #
+
+        def apply_progress_change_via_stats(self, key: str, delta: float):
+            if delta == 0:
+                return
+            for situation in self.get_situations():
+                if not situation.is_running():
+                    continue
+                if self.is_progress_blocked(situation.key, key):
+                    continue
+                situation.change_bar_values_via_stats(key, delta)
+            return
+
+        def apply_progress_change(self, key: str, value: float):
+            """
+            Apply a direct bar delta. No-op until the situation is active.
+
+            Args:
+                key (str): ``situation:<situation_key>:<bar_key>``.
+                value (float): Delta to apply.
+            """
+            parsed = parse_situation_stat_key(key)
+            if parsed is None:
+                return
+            situation_key, bar_key = parsed
+            situation = self.get_situation(situation_key)
+            if situation is None or not situation.is_running():
+                return
+            situation.apply_progress_change(bar_key, value)
+            return
+
+        def get_full_range(self, key: str):
+            """
+            Full available range for a situation bar referenced by a progress key.
+
+            Args:
+                key (str): ``situation:<situation_key>:<bar_key>``.
+
+            Returns:
+                float: ``max - min`` for the bar, or ``0`` if unresolved.
+            """
+            parsed = parse_situation_stat_key(key)
+            if parsed is None:
+                return 0
+            situation_key, bar_key = parsed
+            situation = self.get_situation(situation_key)
+            if situation is None:
+                return 0
+            bar = situation.get_bar(bar_key)
+            if bar is None:
+                return 0
+            return bar.get_full_range()
+
+        def get_gated_range(self, key: str, modifier_value: float):
+            """
+            Gated range for a situation bar referenced by a progress key.
+
+            Args:
+                key (str): ``situation:<situation_key>:<bar_key>``.
+                modifier_value (float): Modifier value whose sign selects the gate.
+
+            Returns:
+                float: Gated range size, or ``0`` if unresolved.
+            """
+            parsed = parse_situation_stat_key(key)
+            if parsed is None:
+                return 0
+            situation_key, bar_key = parsed
+            situation = self.get_situation(situation_key)
+            if situation is None:
+                return 0
+            bar = situation.get_bar(bar_key)
+            if bar is None:
+                return 0
+            return bar.get_gated_range(modifier_value)
+
+
+        # endregion
+        ##########################
+
+        #####################
+        # region Thresholds #
+
+        def add_threshold_check(self, SituationThreshold: SituationThreshold):
+            self.threshold_checks[SituationThreshold.key] = SituationThreshold
+            situation_key = SituationThreshold.situation.key if SituationThreshold.situation is not None else ""
+            lifecycle_registry.track(
+                SituationThreshold.key,
+                "situations",
+                situation_key,
+                "threshold_check",
+            )
+            return self
+
+        def check_threshold(self, key: str, **kwargs):
+            if key not in self.threshold_checks.keys():
+                return
+            threshold = self.threshold_checks[key]
+            if threshold.situation is None or not threshold.situation.is_running():
+                return
+            # State is cleared before trigger_effects so nothing is lost if an effect jumps.
+            if threshold.timed_release is not None:
+                if threshold.timed_release.check_condition(**kwargs):
+                    threshold.set_hold()
+                    del self.threshold_checks[key]
+                    lifecycle_registry.ping(key, REMOVE)
+                    threshold.trigger_effects()
+                elif threshold.blocking.is_fulfilled(**kwargs):
+                    threshold.set_hold()
+                    del self.threshold_checks[key]
+                    lifecycle_registry.ping(key, REMOVE)
+            elif threshold.blocking.is_fulfilled(**kwargs):
+                threshold.reached = True
+                del self.threshold_checks[key]
+                lifecycle_registry.ping(key, REMOVE)
+                threshold.trigger_effects()
+
+            return
+
+        def check_all_thresholds(self, **kwargs):
+            for key in list(self.threshold_checks.keys()):
+                self.check_threshold(key, **kwargs)
+            return
+
+        def is_threshold_reached(self, situation_key: str, threshold_key: str):
+            situation = self.get_situation(situation_key)
+            if situation is None:
+                return False
+            return situation.is_threshold_reached(threshold_key)
+
+
+        # endregion
+        #####################
+
+        #########################
+        # region Pending Events #
+        # Event effects fired from resolutions/thresholds are queued instead of
+        # called: renpy.call raises and would abort the rest of the Python call
+        # chain (situation.complete(), set_hold(), end_event routing, ...).
+        # drain_situation_events runs them once the caller has finished.
+
+        # Class attribute on purpose: deferral depth is transient and never saved.
+        _defer_depth = 0
+
+        def _ensure_pending_events(self):
+            if not hasattr(self, "pending_events") or self.pending_events is None:
+                self.pending_events = []
+
+        def queue_event_effect(self, effect: Effect, kwargs: dict):
+            self._ensure_pending_events()
+            self.pending_events.append((effect, dict(kwargs)))
+            return self
+
+        def has_pending_events(self) -> bool:
+            return len(getattr(self, "pending_events", None) or []) > 0
+
+        def run_next_pending_event(self):
+            """Pop and run the next queued event effect (may renpy.call)."""
+            if not self.has_pending_events():
+                return
+            effect, kwargs = self.pending_events.pop(0)
+            effect.apply_now(**kwargs)
+
+        # endregion
+        #########################
+    # endregion
+    ###########################
+
+    def get_situation_time_index(t: Time) -> int:
+        """
+        A Time as a running daytime count (7 daytimes a day), for pause durations.
+
+        Args:
+            t (Time): The time to convert.
+
+        Returns:
+            int: Daytimes since the start of the calendar.
+        """
+        return (t.get_days_total() - 1) * 7 + t.get_daytime()
+
+    def begin_situation_event_deferral():
+        SituationManager._defer_depth += 1
+
+    def end_situation_event_deferral():
+        SituationManager._defer_depth = max(0, SituationManager._defer_depth - 1)
+
+    def defer_situation_event(effect: Effect, kwargs: dict) -> bool:
+        """
+        Queue an event effect while situation effects are being applied.
+
+        Returns:
+            bool: True if the effect was queued (caller must not run it now).
+        """
+        if SituationManager._defer_depth <= 0 or situation_manager is None:
+            return False
+        situation_manager.queue_event_effect(effect, kwargs)
+        return True
+
+    ###################################
+    # region Definition helpers ----- #
+    # Definition helpers — declarative syntax for load_situations authors.
+    # Chain methods (add_*, set_*) return self; __init__ must not return self.
+
+    def AutoThreshold(approach_hint, *effects, direction=1, visible_range=100, thumbnail=None, default_hold=-1, **bounds):
+        """Auto-fire threshold with empty threshold_hint. Bounds via kwargs, e.g. main=10.
+
+        ``default_hold=-1`` (default): fires once, then latches — never re-arms.
+        Set ``default_hold`` to ``0`` or higher to make it repeatable: after firing,
+        the bar must travel back past the bound by that many points before the
+        threshold can fire again (hysteresis / dead zone). ``0`` re-arms on any
+        re-crossing; larger values suppress flutter while the bar sits near the bound.
+        """
+        return SituationThreshold(approach_hint, "", *effects, direction=direction, visible_range=visible_range, thumbnail=thumbnail, default_hold=default_hold).add_bounds(**bounds)
+
+    def BlockingThreshold(approach_hint, threshold_hint, *conditions, direction=1, visible_range=100, thumbnail=None, default_hold=-1, **bounds):
+        """
+        Blocking threshold — progress stops until a Condition is fulfilled.
+
+        ``default_hold=-1`` (default): no hysteresis; once cleared, stays reached
+        and cannot re-arm. Set ``default_hold`` to ``0`` or higher to enable a
+        reactivation hysteresis zone. Bounds via kwargs, e.g. main=20.
+        """
+        return SituationThreshold(approach_hint, threshold_hint, *conditions, direction=direction, visible_range=visible_range, thumbnail=thumbnail, default_hold=default_hold).add_bounds(**bounds)
+
+    def Bar(key, *elements: Pictogram, weight: float = None, limits = (-100, 100), stat_weights = None, regular_decrease_rate: float = 0, regular_decrease_interval: str = "daytime_change", start_base: float = 0, start_modifiers = None):
+        """
+        Situation bar with limits and optional start-value / wear setup.
+
+        Bar("main",
+            limits=(-30, 60),
+            stat_weights={HAPPINESS: 0.5},
+            regular_decrease_rate=-0.5,
+            start_base=-20,
+            start_modifiers=[
+                StartModifier("+", -5),
+                StartModifier("+", 0.05, stat=HAPPINESS),
+            ],
+        )
+        """
+        bar = SituationBar(key, regular_decrease_rate, regular_decrease_interval).set_limits(limits[0], limits[1])
+        bar.set_start_base(start_base)
+        if start_modifiers:
+            for entry in start_modifiers:
+                bar.add_start_modifier(entry)
+        if stat_weights:
+            for stat, stat_weight in stat_weights.items():
+                bar.add_stat_weight(stat, stat_weight)
+        if weight:
+            bar.set_weight(weight)
+        for element in elements:
+            if isinstance(element, Pictogram):
+                bar.add_pictogram(element)
+        return bar
+
+    def StartModifier(op: str, value: float, name: str = None, stat: str = None):
+        """
+        Authoring helper for bar start-value modifiers.
+
+        Args:
+            op (str): ``+``, ``*``, ``value_percent``, ``range_percent`` or ``gated_percent``.
+            value (float): Operand (flat, factor, percent, or stat weight).
+            name (str, optional): Modifier identity. Auto-generated if omitted.
+            stat (str, optional): School-stat key for snapshot contribution.
+
+        Returns:
+            SituationStartModifier: Entry for Bar(..., start_modifiers=[...]).
+        """
+        if name is None:
+            stat_part = stat if stat is not None else "general"
+            name = f"start:{stat_part}:{op}:{value}"
+        return SituationStartModifier(Modifier_Obj(name, op, value), stat)
+
+    def SituationPool(key, bar_min, bar_max):
+        return SituationEventPools(key, bar_min, bar_max)
+
+    def PassiveOption(key, description, *effects):
+        return SituationPassive(key, description, *effects)
+
+    def MeasureOption(key, description, duration, *limits, instant=None, permanent=None, open_ended=False):
+        """
+        Temporary measure (Schicht 3).
+
+        Args:
+            key: Stable measure id.
+            description: Player-facing text.
+            duration: TimerCondition for active duration, or None for instant
+                (apply then close). Use open_ended=True to hold the slot until
+                something else deactivates (Unlockable Schedule Vote).
+            *limits: Cooldown TimerCondition, ManualCounterCondition, and/or other Conditions.
+            instant: Optional list of SituationEffect applied once on activate (no revert).
+            permanent: List of SituationEffect active for the duration (reverted on end).
+            open_ended: If True with duration None, do not auto-close after apply.
+        """
+        return SituationMeasure(
+            key,
+            description,
+            duration,
+            list(limits),
+            list(instant or []),
+            list(permanent or []),
+            open_ended=open_ended,
+        )
+
+    def Teaser(key, text, *conditions, interpretation=None, note_type=None, image=None, layout=None):
+        """
+        Chronicle note / pre-activation teaser.
+
+        Args:
+            key: Stable teaser id.
+            text: Observation text (supports kwargs interpolation).
+            *conditions: Unlock conditions (at least one required).
+            interpretation: Optional psychologist reading line.
+            note_type: Optional type key: observation|suspicion|insight|setback.
+            image: Optional instant-photo pattern path (resolved on activate).
+            layout: Optional forced layout id. None = random on activate.
+                Text: text_full, text_aside.
+                Photo: photo_left, photo_right, photo_top.
+        """
+        return SituationTeaser(
+            key,
+            text,
+            *conditions,
+            interpretation=interpretation,
+            note_type=note_type,
+            image=image,
+            layout=layout,
+        )
+
+    def PositiveResolution(mode="ALL", *elements, delta_lock=False):
+        """
+        Positive end of a situation. mode: ALL | ANY (bars at max).
+        *elements: Effect and/or Condition. Conditions enable grace until fulfilled.
+        delta_lock: while reached, block negative bar deltas.
+        """
+        return SituationPositiveResolution(mode, *elements, delta_lock=delta_lock)
+
+    def NegativeResolution(mode="ANY", *elements, grace_count=None):
+        """
+        Negative end of a situation. mode: ALL | ANY (bars at min).
+        *elements: Effect and/or Condition. Conditions enable grace until fulfilled.
+        grace_count: optional LatchCounter max (resolution-owned latch).
+        """
+        return SituationNegativeResolution(mode, *elements, grace_count=grace_count)
+
+    def DeadlineResolution(deadline, *elements):
+        """
+        Resolution after deadline Time. Optional Conditions delay fire until fulfilled.
+        """
+        return SituationDeadlineResolution(deadline, *elements)
+
+    def ConditionResolution(key, *elements):
+        """
+        Resolution that fires when its Conditions are fulfilled, ignoring bars.
+
+        Args:
+            key: Unique resolution key on the situation.
+            *elements: Condition and/or Effect. Needs at least one of each.
+        """
+        return SituationConditionResolution(key, *elements)
+
+    def Picto(key):
+        if pictogram_manager is None:
+            return None
+        return pictogram_manager.get_pictogram(key)
+
+    def activate_situation_teaser(situation_key, teaser_key, **kwargs):
+        """Manually activate a teaser (e.g. from the Ren'Py console). Does not activate the situation."""
+        if situation_manager is None:
+            return None
+        situation = situation_manager.get_situation(situation_key)
+        if situation is None or teaser_key not in situation.teasers:
+            return None
+        return situation.teasers[teaser_key].activate(**kwargs)
+
+    def register_situations(*situations):
+        """Load or update templates. Call from label load_situations.
+
+        Registration is gated on the current mod being active (like event
+        `add_event`), so a disabled mod's situations are not registered.
+        """
+        if is_mod_active(active_mod_key):
+            for situation in situations:
+                situation_manager.load_situation(situation)
+
+    # endregion Definition helpers ---#
+    ###################################
+
+
+# Runs event effects queued by situation resolutions/thresholds, one call at a
+# time, then optionally continues end_event's routing (new_daytime, map_entry, ...).
+label drain_situation_events (end_route = None, **kwargs):
+    while situation_manager is not None and situation_manager.has_pending_events():
+        $ situation_manager.run_next_pending_event()
+    if end_route is not None:
+        $ route_end_event(end_route, **kwargs)
+    return
+
+label load_situations:
+    $ set_current_mod('base')
+
+    if not situation_manager:
+        $ situation_manager = SituationManager()
+
+    $ situation_manager.begin_situation_load_wave()
+
+    # Example situation. Situations are inactive until something calls
+    # situation_manager.get_situation("example_situation").activate().
+    $ register_situations(
+        Situation("example_situation", "Example Situation", "A minimal situation showing a bar, thresholds, a passive option and resolutions. Replace it with your own.",
+            Teaser("example_teaser", "Something seems to be going on around campus.", PlaceholderCondition(), interpretation="Teasers hint at a situation before the player understands it.", note_type="observation"),
+            Bar("main", limits = (-30, 30), stat_weights = {HAPPINESS: 0.5, REPUTATION: 0.5}),
+            AutoThreshold("Things are looking up.", main = 10),
+            BlockingThreshold("Progress is blocked until the player does something.", "Hint shown to the player on how to continue.", PlaceholderCondition(), main = 20),
+            PassiveOption(
+                "do_nothing",
+                "Do nothing",
+                # No-op effect so SituationPassive self-check passes.
+                SituationEffectSetGameData("example_situation_do_nothing_noop", 0, "No-op"),
+            ),
+            PositiveResolution("ALL", DummyEffect()),
+            NegativeResolution("ANY", DummyEffect()),
+        ),
+    )
+
+    # Debug: Situation Test Lab (situation_test_lab.rpy). Inactive and hidden until
+    # started from Journal -> Cheats -> Debug.
+    $ register_situations(build_situation_test_lab())

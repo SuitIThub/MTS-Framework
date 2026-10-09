@@ -1,0 +1,1068 @@
+init -6 python:
+    from typing import Dict, Any
+    import re
+
+    class Stat:
+        """
+        This class represents a stat of a Character Object.
+
+        ### Attributes:
+        1. type: str
+            - The type of the stat.
+        2. value: num
+            - The current value of the stat.
+        3. changed_value: num
+            - The change of the stat since the last update.
+        4. image_path: str
+            - The path to the icon image of the stat.
+
+        ### Methods:
+        1. get_name() -> str
+            - Returns the name of the stat.
+        2. get_value() -> num
+            - Returns the current value of the stat.
+        3. get_changed_value() -> num
+            - Returns the change of the stat since the last update.
+        4. set_value(value: num, level: int = 10)
+            - Sets the value of the stat to the given value.
+            - The value is clamped between the min and max limit of the stat.
+            - The change of the stat is calculated and saved.
+        5. set_changed_value(value: num)
+            - Sets the change of the stat to the given value.
+        6. change_value(delta: num, level: int = 10)
+            - Changes the value of the stat by the given delta.
+            - The value is clamped between the min and max limit of the stat.
+            - The change of the stat is calculated and saved.
+        7. change_value_to(value: num, level: int = 10)
+            - Changes the value of the stat to the given value.
+            - The value is clamped between the min and max limit of the stat.
+            - The change of the stat is calculated and saved.
+        8. reset_change()
+            - Resets the change of the stat to 0.
+        9. get_level() -> int
+            - Returns the data level of the stat. See Stat_Data for more information.
+        10. get_image() -> str
+            - Returns the path to the image representing the stat for overview in the journal. See Stat_Data for more information.
+        11. get_description() -> str
+            - Returns the description of the stat for overview in the journal. See Stat_Data for more information.
+        12. get_full_description() -> str
+            - Returns the full description of the stat for the journal. See Stat_Data for more information.
+        13. display_stat() -> str
+            - Returns the stat as a string for display in the journal.
+        14. get_display_value() -> str
+            - Returns the value of the stat as a string for display in the journal.
+        15. get_display_change() -> str
+            - Returns the change of the stat as a string for display in the journal.
+
+        ### Parameters:
+        1. type: str
+            - The type of the stat.
+        2. value: num
+            - The current value of the stat.
+        """
+
+        def __init__(self, type: str, value: num):
+            self.type = type
+            self.value = value
+            self.changed_value = 0
+            self.image_path = "icons/" + str(type) + "_icon_50.webp"
+
+        def _repair(self) -> bool:
+            if not hasattr(self, 'type') and hasattr(self, 'image_path'):
+                stat_type = re.sub(r'icons/', '', self.image_path)
+                stat_type = re.sub(r'_icon_50.webp', '', stat_type)
+                self.type = stat_type
+                return True
+            return False
+
+        def get_image_path(self):
+            if self.image_path.endswith('.png'):
+                self.image_path = re.sub(r'\.png$', '.webp', self.image_path)
+            return self.image_path
+
+
+        def get_name(self) -> str:
+            """
+            Returns the name of the stat.
+
+            ### Returns:
+            1. str
+                - The name of the stat.
+            """
+
+            if not hasattr(self, 'type'):
+                self.type = ""
+
+            return self.type
+
+        def get_value(self) -> num:
+            """
+            Returns the current value of the stat.
+
+            ### Returns:
+            1. num
+                - The current value of the stat.
+            """
+
+            return self.value
+        
+        def get_changed_value(self) -> num:
+            """
+            Returns the change of the stat since the last update.
+
+            ### Returns:
+            1. num
+                - The change of the stat since the last update.
+            """
+
+            return self.changed_value
+
+        def set_value(self, value: num, level: int = 10):
+            """
+            Sets the value of the stat to the given value.
+
+            ### Parameters:
+            1. value: num
+                - The value to set the stat to.
+            2. level: int (default 10)
+                - The level of the school. This is used to calculate the min and max limit of the stat.
+            """
+
+            old_value = self.value
+
+            minLimit = Stat_Data[self.type].get_min_limit()
+            maxLimit = Stat_Data[self.type].get_max_limit()
+
+            # self.value = clamp_value(round(value, 2), minLimit, maxLimit)
+            self.value = clamp_stat_value(round(value, 2), self.type, level, minLimit, maxLimit)
+
+            delta = round(self.value - old_value, 2)
+            self.set_changed_value(delta)
+
+            quest_manager.check_task_type("stats")
+
+            situation_manager.apply_progress_change_via_stats(self.type, delta)
+
+        def set_changed_value(self, value: num):
+            """
+            Sets the change of the stat to the given value.
+
+            ### Parameters:
+            1. value: num
+                - The value to set the change of the stat to.
+            """
+
+            self.changed_value = value
+
+        def add_changed_value(self, value: num):
+            """
+            Adds the given value to the change of the stat.
+
+            ### Parameters:
+            1. value: num
+                - The value to add to the change of the stat.
+            """
+
+            self.changed_value += value
+        
+        def check_stat(self, value: str | int) -> bool:
+            """
+            Checks if the value is in the range of the stat.
+
+            ### Parameters:
+            1. value: str | int
+                - The value to check.
+
+            ### Returns:
+            1. bool
+                - True if the value is in the range of the stat. False otherwise
+            """
+
+            return check_in_value(value, self.get_value())
+
+        def change_value(self, delta: num, level: int = 10):
+            """
+            Changes the value of the stat by the given delta.
+
+            ### Parameters:
+            1. delta: num
+                - The value to change the stat by.
+            2. level: int (default 10)
+                - The level of the school. This is used to calculate the min and max limit of the stat.
+            """
+
+            minLimit = Stat_Data[self.type].get_min_limit()
+            maxLimit = Stat_Data[self.type].get_max_limit()
+
+            if self.value + delta < minLimit:
+                delta = -(self.value - minLimit)
+            elif self.value + delta > maxLimit:
+                delta = maxLimit - self.value
+
+            old_value = self.value
+
+            change_val = math.ceil(delta * 100.0) / 100.0
+            self.value = clamp_stat_value(round(self.value + change_val, 2), self.type, level, minLimit, maxLimit)
+
+            change_val = round(self.value - old_value, 2)
+
+            self.add_changed_value(change_val)
+
+            quest_manager.check_task_type("stats")
+
+            situation_manager.apply_progress_change_via_stats(self.type, change_val)
+
+        def change_value_to(self, value: num, level: int = 10):
+            """
+            Changes the value of the stat to the given value.
+
+            ### Parameters:
+            1. value: num
+                - The value to change the stat to.
+            2. level: int (default 10)
+                - The level of the school. This is used to calculate the min and max limit of the stat.
+            """
+
+            delta = value - self.value
+            change_value(delta, level)
+
+        def reset_change(self):
+            """
+            Resets the change of the stat to 0.
+            """
+
+            self.changed_value = 0
+
+        def get_level(self) -> int:
+            """
+            Returns the data level of the stat. See Stat_Data for more information.
+
+            ### Returns:
+            1. int
+                - The data level of the stat.
+            """
+
+            return Stat_Data[self.type].get_level(self.value)
+
+        def get_image(self) -> str:
+            """
+            Returns the path to the image representing the stat for overview in the journal. See Stat_Data for more information.
+
+            ### Returns:
+            1. str
+                - The path to the image representing the stat for overview in the journal.
+            """
+
+            return Stat_Data[self.type].get_image(self.get_level())
+
+        def get_stat_description(self, **kwargs) -> str:
+            """
+            Returns the description of the stat for overview in the journal. See Stat_Data for more information.
+
+            ### Returns:
+            1. str
+                - The description of the stat for overview in the journal.
+            """
+
+            return Stat_Data[self.type].get_stat_description(**kwargs)
+
+        def get_description(self) -> str:
+            """
+            Returns the description of the stat for overview in the journal. See Stat_Data for more information.
+
+            ### Returns:
+            1. str
+                - The description of the stat for overview in the journal.
+            """
+
+            return Stat_Data[self.type].get_description(self.get_level())
+
+        def get_full_description(self, **kwargs) -> str:
+            """
+            Returns the full description of the stat for the journal. See Stat_Data for more information.
+
+            ### Returns:
+            1. str
+                - The full description of the stat for the journal.
+                - The full description consists of the description for the current level and the general description of the stat.
+            """
+
+            return Stat_Data[self.type].get_full_description(self.get_level(), **kwargs)
+
+        def display_stat(self) -> str:
+            """
+            Returns the stat as a string for display in the journal.
+
+            ### Returns:
+            1. str
+                - The stat as a string for display in the journal.
+                - The string consists of the value of the stat and the change of the stat.
+            """
+
+            return self.get_display_value() + self.get_display_change()
+
+        def get_display_value(self) -> str:
+            """
+            Returns the value of the stat as a string for display in the journal.
+
+            ### Returns:
+            1. str
+                - The value of the stat as a string for display in the journal.
+            """
+
+            stat_value = self.get_value() + 0
+
+            stat_value = round(stat_value, 2)
+
+            if self.get_name() == MONEY:
+                stat_value = int(stat_value)
+
+            text = str(stat_value)
+            
+            level = get_school().get_level()
+            
+            limit_value = -1
+
+            if self.get_name() == CORRUPTION:
+                limit_value = clamp_value(100, 0, level * 10)
+            elif self.get_name() == INHIBITION:
+                limit_value = clamp_value(0, 100 - (level * 10), 100)
+
+            if stat_value == limit_value:
+                text = "{color=#e4900c}" + str(stat_value) + "{/color}"
+
+            return text
+
+        def get_display_change(self) -> str:
+            """
+            Returns the change of the stat as a string for display in the journal.
+
+            ### Returns:
+            1. str
+                - The change of the stat as a string for display in the journal.
+            """
+
+            global change
+            change = self.get_changed_value()
+
+            change = round(change, 2)
+
+            if self.get_name() == MONEY:
+                change = int(change)
+
+            text = ""
+
+
+            if (self.get_name() != INHIBITION):
+                if change < 0:
+                    text = "{color=#a00000}{size=15}" + str(change) + "{/size}{/color}"
+                elif change > 0:
+                    text = "{color=#00a000}{size=15}+" + str(change) + "{/size}{/color}"
+            else:
+                if change > 0:
+                    text = "{color=#a00000}{size=15}+" + str(change) + "{/size}{/color}"
+                elif change < 0:
+                    change = -change
+                    text = "{color=#00a000}{size=15}-" + str(change) + "{/size}{/color}"
+            return text
+
+    class Stat_Data:
+        """
+        This class represents the data of a stat.
+        This class is used to store background information about a stat.
+        To make it changeable for existing save games and centralised for all stats, the data has been extracted from the stat-class.
+
+        ### Attributes:
+        1. type: str
+            - The type of the stat.
+        2. title: str
+            - The title of the stat. This is the name that is used on displayables
+        3. levels: List[int]
+            - The levels of the stat.
+            - Stats are separated into different levels. Each level has a different image and description.
+        4. images: List[str]
+            - The images of the stat. Depending on the level of the stat, a different image is used.
+        5. descriptions: List[str]
+            - The descriptions of the stat. Depending on the level of the stat, a different description is used.
+        6. description: List[str | Tuple[str, Condition]]
+            - The general description of the stat.
+        7. min_limit: num
+            - The minimum limit of the stat.
+        8. max_limit: num
+            - The maximum limit of the stat.
+
+        ### Methods:
+        1. __class_getitem__(key: str) -> Stat_Data
+            - Returns the Stat_Data object with the given key.
+        2. _update(title: str, data: Dict[str, Any] = None)
+            - Updates the data of the stat.
+            - If data is None, the data is not updated.
+        3. get_title() -> str
+            - Returns the title of the stat.
+        4. get_min_limit() -> int
+            - Returns the minimum limit of the stat.
+        5. get_max_limit() -> int
+            - Returns the maximum limit of the stat.
+        6. get_level(value: int) -> int
+            - Returns the level of the stat for the given value.
+        7. get_image(level: int) -> str
+            - Returns the image of the stat for the given level.
+        8. get_description(level: int) -> str
+            - Returns the description of the stat for the given level.
+        9. get_full_description(level: int) -> str
+            - Returns the full description of the stat for the given level.
+        10. clamp_stat_value(value: num, stat: str, level: int, min: num = 0, max: num = 100) -> num
+            - Clamps the given value between the min and max limit of the stat.
+        11. clamp_value(value: num, min: num = 0, max: num = 100) -> num
+            - Clamps the given value between the given min and max value.
+        12. load_stat_data(name: str, title: str, data: Dict[str, Any])
+            - Loads and updates the data of the stat.
+            - If the stat does not exist, a new stat is created.
+        13. get_stat_levels(value: str) -> num
+            - Returns the level of the stat for the given value.
+        """
+
+        def __init__(self, type: str, title: str):
+            self.type = type
+            self.title = title
+            self.levels = [0]
+            self.images = ["images/journal/empty_image.webp"]
+            self.descriptions = ["EMPTY"]
+            self.description = "test"
+            self.min_limit = 0
+            self.max_limit = 100
+
+        def __class_getitem__(cls, key: str) -> Stat_Data:
+            if not key in stat_data.keys():
+                return None
+            return stat_data[key]
+
+        def _update(self, title: str, data: Dict[str, Any] = None):
+            if data != None:
+                self.__dict__.update(data)
+
+            self.title = title
+            
+            if not hasattr(self, 'levels'):
+                self.levels = [0]
+            if not hasattr(self, 'images'):
+                self.images = ["images/journal/empty_image.webp"]
+            if not hasattr(self, 'descriptions'):
+                self.descriptions = ["EMPTY"]
+            if not hasattr(self, 'description'):
+                self.description = "test"
+            if not hasattr(self, 'min_limit'):
+                self.min_limit = 0
+            if not hasattr(self, 'max_limit'):
+                self.max_limit = 100
+
+        def get_title(self) -> str:
+            """
+            Returns the title of the stat.
+            The title is the name that is used on displayables.
+
+            ### Returns:
+            1. str
+                - The title of the stat.
+            """
+
+            return self.title
+
+        def get_min_limit(self) -> int:
+            """
+            Returns the minimum limit of the stat.
+
+            ### Returns:
+            1. int
+                - The minimum limit of the stat.
+            """
+
+            return self.min_limit
+
+        def get_max_limit(self) -> int:
+            """
+            Returns the maximum limit of the stat.
+
+            ### Returns:
+            1. int
+                - The maximum limit of the stat.
+            """
+            return self.max_limit
+
+        def get_level(self, value: int) -> int:
+            """
+            Returns the level of the stat for the given value.
+
+            ### Parameters:
+            1. value: int
+                - The value to get the level for.
+
+            ### Returns:
+            1. int
+                - The level of the stat for the given value.
+            """
+
+            
+            closest_value = len(self.levels) - 1
+            for i, val in enumerate(self.levels):
+                if val >= value and val < self.levels[closest_value]:
+                    closest_value = i
+
+            # count = 0
+            # for l in self.levels:
+            #     if value <= l:
+            #         return count - 1
+            #     count += 1
+
+            # if count >= len(self.levels):
+            #     return len(self.levels) - 1
+
+            return closest_value
+        
+        def get_image(self, level: int) -> str:
+            """
+            Returns the image of the stat for the given level.
+
+            ### Parameters:
+            1. level: int
+                - The level to get the image for.
+
+            ### Returns:
+            1. str
+                - The image of the stat for the given level.
+            """
+
+            if level < len(self.images) and level >= 0:
+                return self.images[level]
+            return "images/journal/empty_image.webp"
+
+        def get_stat_description(self, **kwargs) -> str:
+            """
+            Returns the description of the stat for overview in the journal.
+
+            ### Returns:
+            1. str
+                - The description of the stat for overview in the journal.
+            """
+
+            if (isinstance(self.description, str)):
+                return self.description
+            output = ""
+            for i, desc in enumerate(self.description):
+                if isinstance(desc, str):
+                    output += desc + "\n"
+                elif isinstance(desc, Tuple) and isinstance(desc[0], str) and isinstance(desc[1], Condition):
+                    if desc[1].is_fulfilled(**kwargs):
+                        output += desc[0] + "\n"
+            return output
+
+        def get_description(self, level: int) -> str:
+            """
+            Returns the description of the stat for the given level.
+
+            ### Parameters:
+            1. level: int
+                - The level to get the description for.
+
+            ### Returns:
+            1. str
+                - The description of the stat for the given level.
+            """
+
+            if level < len(self.descriptions) and level >= 0:
+                return self.descriptions[level]
+            return "Description missing for level:" + str(level)
+
+        def get_full_description(self, level: int, **kwargs) -> str:
+            """
+            Returns the full description of the stat for the given level.
+            The full description consists of the description for the current level and the general description of the stat.
+
+            ### Parameters:
+            1. level: int
+                - The level to get the full description for.
+
+            ### Returns:
+            1. str
+                - The full description of the stat for the given level.
+            """
+
+            return (self.get_description(level) + 
+                "\n-------------------------------------------------------\n" + 
+                self.get_stat_description(**kwargs))
+
+        def get_full_range(self) -> int:
+            """
+            Returns the full available range of the stat.
+
+            ### Returns:
+            1. int
+                - The full range of the stat.
+            """
+
+            return self.get_max_limit() - self.get_min_limit()
+
+        def get_gated_range(self, level: int = 10) -> int:
+            """
+            Returns the available range of the stat based on the school level.
+
+            Corruption and Inhibition are gated by school level: each level unlocks
+            10 points of the 0-100 scale. Other stats return the full range.
+
+            ### Parameters:
+            1. level: int (default 10)
+                - The level of the school used to calculate the gated range.
+
+            ### Returns:
+            1. int
+                - The gated range of the stat for the given school level.
+            """
+
+            full_range = self.get_full_range()
+
+            if self.type in (CORRUPTION, INHIBITION):
+                return int(clamp_value(level * (full_range / 10), 0, full_range))
+
+            return full_range
+
+    def get_stat_icon_path(stat: str, *, size: str = ICON_SMALL, white: bool = True) -> str:
+        """
+        Returns the image path of the stat icon.
+
+        ### Parameters:
+        1. stat: str
+            - The type of the stat.
+        2. size: str (default ICON_SMALL)
+            - Pixel size token used in the filename (20, 50, 511).
+        3. white: bool (default True)
+            - Whether to use the white icon variant.
+
+        ### Returns:
+        1. str
+            - The path to the icon image of the stat.
+        """
+
+        color = "white" if white else "black"
+        return "icons/" + str(stat) + "_icon_" + size + "_" + color + ".webp"
+
+    def get_stat_icon(stat: str, *, size: str = ICON_SMALL, white: bool = True) -> str:
+        """
+        Returns the path to the icon image of the stat.
+
+        ### Parameters:
+        1. stat: str
+            - The type of the stat.
+
+        ### Returns:
+        1. str
+            - The path to the icon image of the stat.
+        """
+
+        return "{image=" + get_stat_icon_path(stat, size=size, white=white) + "}"
+
+    def clamp_stat_value(value: num, stat: str, level: int, min: num = 0, max: num = 100) -> num:
+        """
+        Clamps the given value between the min and max limit of the stat.
+        The min and max limit are calculated based on the level of the school.
+        Exceptions are the corruption and inhibition stat. 
+        For these stats the min and max limit are calculated based on the level of the school.
+
+        ### Parameters:
+        1. value: num
+            - The value to clamp.
+        2. stat: str
+            - The type of the stat.
+        3. level: int
+            - The level of the school. This is used to calculate the min and max limit of the stat.
+        4. min: num (default 0)
+            - The minimum limit of the stat.
+        5. max: num (default 100)
+            - The maximum limit of the stat.
+
+        ### Returns:
+        1. num
+            - The clamped value.
+        """
+
+        if stat == CORRUPTION:
+            return clamp_value(value, min, level * (max / 10))
+        elif stat == INHIBITION:
+            return clamp_value(value, 100 - (level * (max / 10)), max)
+        else:
+            return clamp_value(value, min, max)
+
+    def clamp_value(value: num, min: num = 0, max: num = 100) -> num:
+        """
+        Clamps the given value between the given min and max value.
+
+        ### Parameters:
+        1. value: num
+            - The value to clamp.
+        2. min: num (default 0)
+            - The minimum limit of the stat.
+        3. max: num (default 100)
+            - The maximum limit of the stat.
+
+        ### Returns:
+        1. num
+            - The clamped value.
+        """
+
+        if (value < min):
+            return min
+        if (value > max):
+            return max
+        return value
+
+    def load_stat_data(name: str, title: str, data: Dict[str, Any]):
+        """
+        Loads and updates the data of the stat.
+        If the stat does not exist, a new stat is created.
+
+        ### Parameters:
+        1. name: str
+            - The type of the stat.
+        2. title: str
+            - The title of the stat. This is the name that is used on displayables
+        3. data: Dict[str, Any]
+            - The data of the stat.
+        """
+
+        if name not in stat_data.keys():
+            stat_data[name] = Stat_Data(name, title)
+        stat_data[name]._update(title, data)
+
+    def get_stat_levels(value: str) -> num:
+        """
+        Returns a value based on the different constants inserted.
+
+        ### Parameters:
+        1. value: str
+            - The value to get the level for.
+            - The value can be a constant or a string with the format "dec_[constant]".
+            - The constant can be "tiny", "small", "medium", "large" or "giant".
+            - The dec_ prefix can be used to invert the value into its negative equivalent.
+
+        ### Returns:
+        1. num
+            - The value based on the different constants inserted.
+        """
+
+        neg = 1
+
+        if "dec_" in value:
+            value = value.replace("dec_", "")
+            neg = -1
+
+        if value == "tiny":
+            return round(random.uniform(0.1, 0.3), 2) * neg
+        elif value == "small":
+            return round(random.uniform(0.3, 0.5), 2) * neg
+        elif value == "medium":
+            return round(random.uniform(0.5, 1.0), 2) * neg
+        elif value == "large":
+            return round(random.uniform(1.0, 3.0), 2) * neg
+        elif value == "giant":
+            return round(random.uniform(3.0, 7.0), 2) * neg
+        else:
+            return round(random.uniform(0.1, 0.8), 2) * neg
+
+    def reserve_money(key: str, value: int) -> bool:
+        """
+        Reserves the given value of money for the given key.
+
+        ### Parameters:
+        1. key: str
+            - The key to reserve the money for.
+        2. value: int
+            - The value of money to reserve.
+        """
+
+        global money
+
+        if money.get_value() < value:
+            return False
+
+        if key not in reserved_money.keys():
+            reserved_money[key] = 0
+        reserved_money[key] += value
+
+        money.change_value(-value)
+        return True
+
+    def release_money(key: str) -> bool:
+
+        global money
+
+        if key not in reserved_money.keys():
+            return False
+        money.change_value(reserved_money[key])
+        del reserved_money[key]
+        return True
+
+    def spend_reserved_money(key: str) -> bool:
+        global money
+
+        if key not in reserved_money.keys():
+            return False
+        del reserved_money[key]
+
+    def get_full_range(stat: str):
+        """
+        Returns the full available range for a school stat or situation bar.
+
+        Args:
+            stat (str): School stat name or ``situation:<situation_key>:<bar_key>``.
+
+        Returns:
+            float: Full range size, or ``0`` if unresolved.
+        """
+        if not stat:
+            return 0
+        if stat.startswith("situation:"):
+            return situation_manager.get_full_range(stat)
+        if stat not in stat_data:
+            return 0
+        return stat_data[stat].get_full_range()
+
+    def get_gated_range(stat: str, value: float):
+        """
+        Returns the gated range for a school stat or situation bar.
+
+        Args:
+            stat (str): School stat name or ``situation:<situation_key>:<bar_key>``.
+            value (float): Modifier value whose sign selects the gate.
+
+        Returns:
+            float: Gated range size, or ``0`` if unresolved.
+        """
+        if not stat:
+            return 0
+        if stat.startswith("situation:"):
+            return situation_manager.get_gated_range(stat, value)
+        if stat not in stat_data:
+            return 0
+        return stat_data[stat].get_gated_range(value)
+
+label load_stats ():
+
+    $ load_stat_data(CORRUPTION, "Corruption", {
+        'description': ["Example stat. Describe what corruption means in your game and how the player raises it.",
+            ("\nThis stat is currently capped and cannot be further increased until the level of the school is increased.", StatLimitCondition(CORRUPTION))],
+        'levels': [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        'descriptions': [
+            "Corruption level 0 description.",
+            "Corruption level 1 description.",
+            "Corruption level 2 description.",
+            "Corruption level 3 description.",
+            "Corruption level 4 description.",
+            "Corruption level 5 description.",
+            "Corruption level 6 description.",
+            "Corruption level 7 description.",
+            "Corruption level 8 description.",
+            "Corruption level 9 description.",
+            "Corruption level 10 description.",
+        ],
+        'images': [
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+        ],})
+
+    $ load_stat_data(INHIBITION, "Inhibition", {
+        'description': ["Example stat. Describe what inhibition means in your game and how the player lowers it.",
+            ("\nThis stat is currently capped and cannot be further decreased until the level of the school is increased.", StatLimitCondition(INHIBITION))],
+        'levels': [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        'descriptions': [
+            "Inhibition level 0 description.",
+            "Inhibition level 1 description.",
+            "Inhibition level 2 description.",
+            "Inhibition level 3 description.",
+            "Inhibition level 4 description.",
+            "Inhibition level 5 description.",
+            "Inhibition level 6 description.",
+            "Inhibition level 7 description.",
+            "Inhibition level 8 description.",
+            "Inhibition level 9 description.",
+            "Inhibition level 10 description.",
+        ],
+        'images': [
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+        ],})
+
+    $ load_stat_data(HAPPINESS, "Happiness", {
+        'description': "Happiness describes how happy the students are to be at this school.",
+        'levels': [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        'descriptions': [
+            "Happiness level 0 description.",
+            "Happiness level 1 description.",
+            "Happiness level 2 description.",
+            "Happiness level 3 description.",
+            "Happiness level 4 description.",
+            "Happiness level 5 description.",
+            "Happiness level 6 description.",
+            "Happiness level 7 description.",
+            "Happiness level 8 description.",
+            "Happiness level 9 description.",
+            "Happiness level 10 description.",
+        ],
+        'images': [
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+        ],})
+
+    $ load_stat_data(EDUCATION, "Education", {
+        'description': "Education measures how good the students are at school.",
+        'levels': [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        'descriptions': [
+            "Education level 0 description.",
+            "Education level 1 description.",
+            "Education level 2 description.",
+            "Education level 3 description.",
+            "Education level 4 description.",
+            "Education level 5 description.",
+            "Education level 6 description.",
+            "Education level 7 description.",
+            "Education level 8 description.",
+            "Education level 9 description.",
+            "Education level 10 description.",
+        ],
+        'images': [
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+        ],})
+
+    $ load_stat_data(CHARM, "Charm", {
+        'description': "Charm describes how other people perceive the students.",
+        'levels': [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        'descriptions': [
+            "Charm level 0 description.",
+            "Charm level 1 description.",
+            "Charm level 2 description.",
+            "Charm level 3 description.",
+            "Charm level 4 description.",
+            "Charm level 5 description.",
+            "Charm level 6 description.",
+            "Charm level 7 description.",
+            "Charm level 8 description.",
+            "Charm level 9 description.",
+            "Charm level 10 description.",
+        ],
+        'images': [
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+        ],})
+
+    $ load_stat_data(REPUTATION, "Reputation", {
+        'description': "Reputation shows how the public sees you and your school.",
+        'levels': [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        'descriptions': [
+            "Reputation level 0 description.",
+            "Reputation level 1 description.",
+            "Reputation level 2 description.",
+            "Reputation level 3 description.",
+            "Reputation level 4 description.",
+            "Reputation level 5 description.",
+            "Reputation level 6 description.",
+            "Reputation level 7 description.",
+            "Reputation level 8 description.",
+            "Reputation level 9 description.",
+            "Reputation level 10 description.",
+        ],
+        'images': [
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+        ],})
+
+    $ load_stat_data(LEVEL, "Level", {
+        'description': "The level of the school represents the overall progress of the school. Every new level unlocks new possibilities.",
+        'levels': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        'descriptions': [
+            "Level level 0 description.",
+            "Level level 1 description.",
+            "Level level 2 description.",
+            "Level level 3 description.",
+            "Level level 4 description.",
+            "Level level 5 description.",
+            "Level level 6 description.",
+            "Level level 7 description.",
+            "Level level 8 description.",
+            "Level level 9 description.",
+            "Level level 10 description.",
+        ],
+        'images': [
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+            "images/journal/empty_image.webp",
+        ],
+        'max_limit': 10,})
+
+    $ load_stat_data(MONEY, "Money", {
+        'description': "The money is used to purchase upgrades for the school and to pay for expenses.\n" +
+            "You have to pay for all of that with your own budget, but you get a monthly budget from the authorities.\n\n" +
+            "Of course, you don't get much. You have to make sure that you don't run out of money. "+
+            "You can also earn money by working in your office. Maybe you find another way...",
+        'max_limit': 1000000000,})
+    

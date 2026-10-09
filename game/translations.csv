@@ -1,0 +1,66 @@
+location;Location
+girl_name;Girl
+topic;Topic
+variant;Variant
+teacher;Teacher
+education;Education
+inhibition;Inhibition
+corruption;Corruption
+happiness;Happiness
+charm;Charm
+money;Money
+reputation;Reputation
+class;Class
+normal;Normal
+nude;Nude
+rule;Rules
+club;Clubs
+building;Buildings
+school_level;Level
+parent_level;Level
+teacher_level;Level
+secretary_level;Level
+
+misc;Miscellaneous
+office_building;Office Building
+school_building;School Building
+
+students;Students
+parents;Parents
+staff;Staff
+
+look_around;Look Around
+patrol;Patrol
+
+############
+# Subjects
+
+math;Mathematics
+
+###############
+# Event Names
+
+#################
+# Office Building
+event_office_building_look_around;Look Around
+event_office_building_work;Work
+event_office_building_money;Make some money
+event_office_building_education;Improve teaching material
+event_office_building_reputation;Improve school reputation
+event_office_building_learn;Learn subject ({color=#a00000}-500${/color})
+event_office_building_computer;Computer
+
+work_office_money_event_1;Make money
+work_office_education_event_1;Improve teaching material
+work_office_reputation_event_1;Improve school reputation
+
+#################
+# School Building
+event_school_building_patrol;Patrol
+example_event;Example Event
+
+#################
+# Character Names
+
+jane_doe;Jane Doe
+secretary;Sam Taylor
