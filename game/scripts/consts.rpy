@@ -1,7 +1,7 @@
 init -9:
     
-    $ CORRUPTION = "corruption"
-    $ INHIBITION = "inhibition"
+    $ MOTIVATION = "motivation"
+    $ SHYNESS = "shyness"
     $ HAPPINESS = "happiness"
     $ EDUCATION = "education"
     $ CHARM = "charm"
@@ -33,7 +33,7 @@ init -9:
 
     $ CHAR = "char_obj"
 
-    $ DEFAULT_NUDE = 0
+    $ DEFAULT_OUTFIT_LEVEL = 0
 
     $ ICON_XSMALL = "20"
     $ ICON_SMALL = "50"

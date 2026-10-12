@@ -8,7 +8,7 @@ init -1 python:
             renpy.hide_screen(s)
 
     OVERVIEW_STAT_ORDER = (
-        HAPPINESS, CHARM, EDUCATION, MONEY, CORRUPTION, INHIBITION, REPUTATION
+        HAPPINESS, CHARM, EDUCATION, MONEY, MOTIVATION, SHYNESS, REPUTATION
     )
 
     def get_overview_stat_change_value(stat: str):
@@ -36,7 +36,7 @@ init -1 python:
         """
         Returns the HUD colour for a stat change.
 
-        Increase is green and decrease is red. Inhibition is inverted.
+        Increase is green and decrease is red. Shyness is inverted.
 
         ### Parameters:
         1. stat: str
@@ -53,7 +53,7 @@ init -1 python:
             return "#ffffff"
 
         increased = change > 0
-        beneficial = (not increased) if stat == INHIBITION else increased
+        beneficial = (not increased) if stat == SHYNESS else increased
         return "#00a000" if beneficial else "#a00000"
 
     OVERVIEW_TENDENCY_ARROWS_POS = (">", "≫", "⋙")

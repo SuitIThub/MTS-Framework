@@ -29,7 +29,7 @@ The same strings work for stats, calendar fields, timers — every check that ro
 through `check_in_value`:
 
 ```python
-StatCondition(corruption="20+", happiness="40-60")
+StatCondition(motivation="20+", happiness="40-60")
 TimeCondition(weekday="1-5", daytime="2")   # any weekday, second daytime segment
 ```
 

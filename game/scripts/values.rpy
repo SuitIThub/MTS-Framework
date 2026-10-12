@@ -1,6 +1,6 @@
 init -98 python:
     cheat_mode = False
-    nude_vision = 2
+    outfit_level_limit = 2
     sfw_mode = False
     event_selection_mode = False
     INT64_MAX = 2**63 - 1

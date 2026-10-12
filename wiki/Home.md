@@ -1,7 +1,6 @@
 # MTS Framework — Wiki
 
-The MTS Framework is the engine behind *Mind the School*, stripped of all game
-content: a Ren'Py sandbox framework for management games with locations, events,
+The MTS Framework is a Ren'Py sandbox framework for management games with locations, events,
 characters, stats, situations, unlockables, a journal and a paperdoll system.
 
 ## 🛠️ For Developers & Modders

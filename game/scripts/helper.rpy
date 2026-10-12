@@ -75,7 +75,7 @@ init -99 python:
         `values` layer, so they can be spread into any kwargs-consuming call without a
         key collision:
 
-            $ image = convert_pattern("main", **with_values(kwargs, skimpy_bra = True))
+            $ image = convert_pattern("main", **with_values(kwargs, formal_wear = True))
             $ show_pattern("main", **with_values(kwargs, girls = "jane_doe"))
 
         The values land in kwargs["values"] — the same layer selectors fill and the image

@@ -19,7 +19,7 @@ An Option is a small flag you append after a host's own constructor arguments. S
 object, different meaning per host:
 
 ```python
-StatCondition(OptionalOption(), corruption=20)               # a soft, always-passing gate
+StatCondition(OptionalOption(), motivation=20)               # a soft, always-passing gate
 MoneyEffect("cost", -500, "ADD", EffectNoRevertOption())     # spend that is never refunded
 Event(3, "secret_scene", TimeCondition(daytime="d"), NoHighlightOption())  # runs, but no map hint
 ```

@@ -160,7 +160,7 @@ condition-relevant ones:
 Other options are event- or effect-specific (`FragmentRepeatOption`,
 `EffectNoRevertOption`, `MoneyEscrowOption`, …) — see the
 [Options](Options) guide. Options are passed positionally after
-the constructor's own args: `StatCondition(OptionalOption(), corruption=20)`.
+the constructor's own args: `StatCondition(OptionalOption(), motivation=20)`.
 
 ---
 
@@ -175,7 +175,7 @@ ranges** — the shared number-pattern grammar is documented in
 
 | Constructor | Checks |
 |-------------|--------|
-| `StatCondition(*options, char_obj=None, **stats)` | each `stat=threshold` kwarg is met on `char_obj` (default school), e.g. `StatCondition(corruption=20, happiness=50)` |
+| `StatCondition(*options, char_obj=None, **stats)` | each `stat=threshold` kwarg is met on `char_obj` (default school), e.g. `StatCondition(motivation=20, happiness=50)` |
 | `StatLimitCondition(stat, char_obj=None, *options)` | the stat is at its current level cap |
 | `LevelCondition(value, *options, char_obj=None)` | character/school level meets `value` (e.g. `"2"`, `"2+"`). Default char is school. Named stages (dress/talk/behaviour): school levels |
 | `ProficiencyCondition(proficiency, *options, xp=-1, level=-1)` | a proficiency's xp/level threshold |
@@ -262,7 +262,7 @@ ranges** — the shared number-pattern grammar is documented in
 **Gate on multiple stats:** one `StatCondition` takes several stat kwargs (implicit
 AND across them):
 ```python
-StatCondition(corruption=30, inhibition=20)
+StatCondition(motivation=30, shyness=20)
 ```
 
 **Probabilistic appearance:** `RandomCondition(35)` ≈ a 35 % chance gate — often

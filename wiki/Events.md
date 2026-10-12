@@ -389,7 +389,7 @@ getters** so they are recorded for replay:
 
 ```python
 $ topic  = get_value("topic", **kwargs)
-$ level  = get_stat_value("corr", [0, 40, 70, 100], **kwargs)
+$ level  = get_stat_value("motiv", [0, 40, 70, 100], **kwargs)
 ```
 
 Prefer `get_value` over reaching into `kwargs["values"]` directly — the registration is
@@ -409,7 +409,7 @@ documented in [Images](Images). This section is the event-authoring surface.
 
 `Pattern(key, path, *alternative_keys)` names an image pattern. `path` contains
 `<placeholder>`s filled from selector values and built-in keys (`<step>`,
-`<school_level>`, `<parent_level>`, `<variant>`, `<nude>`, and any selector key). An
+`<school_level>`, `<parent_level>`, `<variant>`, `<outfit_level>`, and any selector key). An
 event can hold several named patterns (`"main"`, `"base"`, `"card"`, …). Patterns are
 **mod-redirected** (built while `set_current_mod` points at a mod).
 
@@ -445,8 +445,8 @@ $ image.show(1)                                  # advance to step 1
 - The `Image_Series.show_image(image, *steps)` label plays several steps in sequence
   (advancing on click) — handy for a short run of frames with no dialogue between.
 
-`<step>` and `<nude>` are resolved by the image system; a `<nude>` image shows the
-highest available nude level for the current state.
+`<step>` and `<outfit_level>` are resolved by the image system; a `<outfit_level>` image shows the
+highest available outfit level for the current state.
 
 ---
 
@@ -619,7 +619,7 @@ label example_chain_4_choice(**kwargs):
         MenuElement("truth", "Pick Truth", EventEffect(".truth_branch")),
         MenuElement("dare",  "Pick Dare",  EventEffect(".dare_branch")),
         MenuElement("peek",  "Keep watching", EventEffect(".peek"),
-            StatCondition(corruption=20)),                 # gated choice
+            StatCondition(motivation=20)),                 # gated choice
         **kwargs
     ) from _tod_choice
 ```
@@ -692,7 +692,7 @@ event `version` in `begin_event` if you restructure them).
 Change **school stats** through the modifier path so global modifiers apply:
 
 ```python
-call change_stats_with_modifier(happiness=SMALL, inhibition=DEC_SMALL) from _e3
+call change_stats_with_modifier(happiness=SMALL, shyness=DEC_SMALL) from _e3
 # with an explicit collection/context (e.g. a subject or location):
 call change_stats_with_modifier('pe', happiness=MEDIUM, charm=SMALL) from _e4
 ```

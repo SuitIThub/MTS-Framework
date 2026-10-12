@@ -40,7 +40,7 @@ automatically if that is what exists on disk.
 5. [How a path is resolved](#5-how-a-path-is-resolved)
 6. [Built-in placeholders](#6-built-in-placeholders)
 7. [Alternatives and the `$` wildcard](#7-alternatives-and-the--wildcard)
-8. [Nude levels](#8-nude-levels)
+8. [Outfit levels](#8-outfit-levels)
 9. [Events](#9-events)
 10. [Screens](#10-screens)
 11. [Classes and other systems](#11-classes-and-other-systems)
@@ -123,7 +123,7 @@ This is implemented once, in `find_loadable_image`, and used by:
 - `find_available_images` / `check_image`
 - `get_image` / `get_available_level` / `get_image_max_value*`
 - `Image_Series` (step/variant probing and display)
-- `show_ready_image` and the nude-toggle screens
+- `show_ready_image` and the outfit-toggle screens
 - paperdoll layer and background resolution
 
 You do **not** write extension fallbacks yourself. Do not call `renpy.loadable` on a
@@ -198,14 +198,14 @@ pattern + kwargs
 ```
 
 `refine_image(path, **kwargs)` returns that string. Paths that still contain
-`<placeholders>` (e.g. `<step>`, `<nude>`) keep the original extension so later
+`<placeholders>` (e.g. `<step>`, `<outfit_level>`) keep the original extension so later
 probing can fill them in.
 
 `get_image(path, **kwargs)` does the same substitution, then:
 
-- if there is no `<nude>`, returns `(0, loadable_path)` or `(-1, original)` on miss,
-- if there is `<nude>`, returns `(max_nude_level, template)` where the template still
-  holds `<nude>` but already has the extension of the file that exists.
+- if there is no `<outfit_level>`, returns `(0, loadable_path)` or `(-1, original)` on miss,
+- if there is `<outfit_level>`, returns `(max_outfit_level, template)` where the template still
+  holds `<outfit_level>` but already has the extension of the file that exists.
 
 ### Several candidates — `refine_image_with_alternatives` + `find_available_images`
 
@@ -225,7 +225,7 @@ from an event label.
 
 ### Display — `show_ready_image`
 
-The low-level show label. If the path still contains `<nude>`, it opens the nude
+The low-level show label. If the path still contains `<outfit_level>`, it opens the outfit
 toggle UI. Otherwise it resolves png/webp and `scene` / `show`s the **resolved** path.
 
 `SCENE` (default) replaces the background; `SHOW` adds it as `general_image`.
@@ -244,7 +244,7 @@ These keys are filled even if you did not pass them in kwargs:
 | `<secretary_level>` | secretary character's level |
 | `<level>` | nearest **existing** file at or below the requested level, else the next one up |
 | `<variant>` | random `1…max` among files that exist (`get_image` / `refine_image_with_variant`) |
-| `<nude>` | not replaced with a single value — see [§8](#8-nude-levels) |
+| `<outfit_level>` | not replaced with a single value — see [§8](#8-outfit-levels) |
 | `<step>` | the frame index, filled by `Image_Series.show(n)` |
 
 Any other `<key>` comes from **kwargs**: event selectors ([Selectors](Selectors)),
@@ -295,27 +295,27 @@ specific file with no `$` sibling is a miss, not a silent skip of that token.
 
 ---
 
-## 8. Nude levels
+## 8. Outfit levels
 
-A path containing `<nude>` is a **template**, not a final file. Files are numbered:
+A path containing `<outfit_level>` is a **template**, not a final file. Files are numbered:
 
 ```text
 images/events/foo/foo 1 0.webp    # clothed
-images/events/foo/foo 1 1.webp    # nude 1
-images/events/foo/foo 1 2.webp    # nude 2
+images/events/foo/foo 1 1.webp    # outfit level 1
+images/events/foo/foo 1 2.webp    # outfit level 2
 ```
 
-`get_image` reports the highest available nude index (capped by `nude_vision`) and
-leaves `<nude>` in the returned template. `show_ready_image` then opens the
+`get_image` reports the highest available outfit index (capped by `outfit_level_limit`) and
+leaves `<outfit_level>` in the returned template. `show_ready_image` then opens the
 eye-icon UI so the player can step between versions.
 
 In an event you usually do not handle this yourself: `image.show(step)` detects
-`<nude>` and routes to that UI. For a one-off path:
+`<outfit_level>` and routes to that UI. For a one-off path:
 
 ```python
-$ nude, path = get_image("images/events/foo/foo <step> <nude>.webp", step=1)
-# nude == 2, path still contains <nude>, extension already matches the files
-call show_image_with_nude_var(path, nude)
+$ outfit_level, path = get_image("images/events/foo/foo <step> <outfit_level>.webp", step=1)
+# outfit_level == 2, path still contains <outfit_level>, extension already matches the files
+call show_image_with_outfit_var(path, outfit_level)
 ```
 
 ---
@@ -474,8 +474,8 @@ BGStorage(
 ```
 
 `BGStorage` stamps the current mod prefix onto each `BGImage`. `call show_idle_image(storage)`
-picks the highest-priority image whose conditions pass, then shows it (with nude
-toggle if the path has `<nude>`).
+picks the highest-priority image whose conditions pass, then shows it (with outfit
+toggle if the path has `<outfit_level>`).
 
 For a one-off backdrop behind a paperdoll, prefer
 `paperdoll_manager.set_background(...)` rather than `BGStorage`.
@@ -529,8 +529,8 @@ resolution, using the stem (so `foo 1 0.webp` and `foo 1 0.png` yield the same
 - **`<level>` does not need a file per level.** The resolver walks to the nearest
   existing file.
 - **Paperdoll patterns stay `.png`** by convention; WebP assets still resolve.
-- **`<school_level>` art matches the climate.** A level-1 still in a conservative
-  uniform, a level-8 still in a nude hallway — see school levels.
+- **`<school_level>` art matches the climate.** A level-1 still in the old
+  uniform, a level-8 still in the new one — see school levels.
   If the event spans a wide level range, ship frames (or `$` fallbacks) that can
   carry the difference.
 
@@ -546,7 +546,7 @@ resolution, using the stem (so `foo 1 0.webp` and `foo 1 0.png` yield the same
 | Wrong event art after adding a mod | `overwrite_event_image` not used, or wrong event/pattern key | Match the event key and pattern name (`"main"`). |
 | Step 0 works, later steps empty | Gap in `<step>` numbering, or only png probed in old code | Number steps densely from `step_start`; current probing sees both extensions. |
 | Variant never appears | No `1…n` files, or `<variant>` not in the pattern | Add `foo 0 1.webp`, `foo 0 2.webp`, … |
-| Nude toggle missing | Path has no `<nude>`, or only level `0` exists | Name files `… 0`, `… 1`, … and keep `<nude>` in the pattern. |
+| Outfit toggle missing | Path has no `<outfit_level>`, or only level `0` exists | Name files `… 0`, `… 1`, … and keep `<outfit_level>` in the pattern. |
 | Screen shows nothing / error on `add` | Displayed the pattern string after a png/webp miss | `path = find_loadable_image(...)`; `add path` only when non-empty. |
 | Paperdoll layer blank | Specific file missing and no `$` sibling for an `alt_key` | Add the file or a `$` fallback; check pose/outfit are exact (not alt keys). |
 | Log path has a gap / double space before `.png` | An `alt_key` (`extra1`, `extra2`, `state`, …) was empty and used to interpolate as a blank token | Empty alt-key values now become `$` immediately. |
@@ -570,7 +570,7 @@ resolution, using the stem (so `foo 1 0.webp` and `foo 1 0.png` yield the same
 
 `refine_image(path, **kwargs)` · `refine_image_with_alternatives(path, alt_keys, **kwargs)` ·
 `find_loadable_image(path)` · `find_available_images(paths)` · `check_image(path)` ·
-`get_image(path, **kwargs)` → `(nude, path)` ·
+`get_image(path, **kwargs)` → `(outfit_level, path)` ·
 `call show_image(path, display_type=SCENE, **kwargs)` ·
 `get_mod_path(key)` / `get_current_mod_path()`.
 

@@ -626,13 +626,13 @@ init -6 python:
     class StatLimitCondition(Condition):
         """A condition class that checks if a character's stat has reached its level-based cap.
 
-        This class specifically handles checking whether Corruption or Inhibition stats
+        This class specifically handles checking whether Motivation or Shyness stats
         have reached their maximum/minimum values, which are determined by the character's level.
-        For Corruption, the cap is (level * 10) up to 100.
-        For Inhibition, the cap is (100 - level * 10) down to 0.
+        For Motivation, the cap is (level * 10) up to 100.
+        For Shyness, the cap is (100 - level * 10) down to 0.
 
         Attributes:
-            _stat (str): The stat to check. Must be either CORRUPTION or INHIBITION.
+            _stat (str): The stat to check. Must be either MOTIVATION or SHYNESS.
             _char_obj (Char): The character whose stat cap is being checked.
             display_in_list (bool): Whether to show this condition in list displays.
                 Defaults to False.
@@ -644,8 +644,8 @@ init -6 python:
             """Initialize a new StatLimitCondition.
 
             Args:
-                stat (str): The stat to check for limit. Must be either CORRUPTION
-                    or INHIBITION.
+                stat (str): The stat to check for limit. Must be either MOTIVATION
+                    or SHYNESS.
                 char_obj (Union[str, Char, None], optional): The character to check stats for.
                     Can be a character object, character key, or None. Defaults to None.
                 **kwargs: Additional arguments passed to parent Condition class.
@@ -663,8 +663,8 @@ init -6 python:
         def check_condition(self, **kwargs) -> bool:
             """Check if the specified stat has reached its level-based cap.
 
-            For Corruption, checks if the stat has reached (level * 10) up to max 100.
-            For Inhibition, checks if the stat has reached (100 - level * 10) down to min 0.
+            For Motivation, checks if the stat has reached (level * 10) up to max 100.
+            For Shyness, checks if the stat has reached (100 - level * 10) down to min 0.
 
             Args:
                 **kwargs: Additional arguments. May include 'char_obj' to specify which
@@ -686,9 +686,9 @@ init -6 python:
                 char_obj = get_kwargs('char_obj', get_school(), **kwargs)
 
             
-            if self._stat == CORRUPTION:
+            if self._stat == MOTIVATION:
                 limit_value = clamp_value(100, 0, char_obj.get_level() * 10)
-            elif self._stat == INHIBITION:
+            elif self._stat == SHYNESS:
                 limit_value = clamp_value(0, 100 - (char_obj.get_level() * 10), 100)
             else:
                 return False
@@ -702,14 +702,14 @@ init -6 python:
             """Get a human-readable name for this condition.
 
             Returns:
-                str: Either "Corruption limit" or "Inhibition limit" based on the
+                str: Either "Motivation limit" or "Shyness limit" based on the
                     stat being checked. Returns empty string for invalid stats.
             """
 
-            if self._stat == CORRUPTION:
-                return "Corruption limit"
-            elif self._stat == INHIBITION:
-                return "Inhibition limit"
+            if self._stat == MOTIVATION:
+                return "Motivation limit"
+            elif self._stat == SHYNESS:
+                return "Shyness limit"
             return ""
 
     class ProficiencyCondition(Condition):

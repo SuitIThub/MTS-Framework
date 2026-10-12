@@ -711,7 +711,7 @@ label call_element(key, effects, **kwargs):
     # """
 
     hide screen custom_menu_choice
-    hide screen image_with_nude_var
+    hide screen image_with_outfit_var
 
     $ in_event = get_kwargs('in_event', False, **kwargs)
     $ in_replay = get_kwargs('in_replay', False, **kwargs)
@@ -762,7 +762,7 @@ label close_menu(**kwargs):
     # Closes the current menu.
     # """
     hide screen custom_menu_choice
-    hide screen image_with_nude_var
+    hide screen image_with_outfit_var
 
     $ override = get_kwargs('override_menu_exit', None, **kwargs)
     if override != None:

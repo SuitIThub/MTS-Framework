@@ -158,7 +158,7 @@ controls (Money uses ±100 / ±1000 instead of Min/Max):
 - **Level** — School, Parent, Teacher, Secretary. School 1–10 is campus
   climate (school levels); forcing it skips the
   temporary votes.
-- **Corruption, Inhibition, Happiness, Education, Charm, Reputation** (School)
+- **Motivation, Shyness, Happiness, Education, Charm, Reputation** (School)
 
 > Danger: **Level** gates content and feeds situation thresholds; the school stats
 > feed situation bars and resolutions. Extreme or jumpy values are the easiest way

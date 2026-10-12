@@ -3,8 +3,7 @@ requests, what not to commit) lives in
 `CONTRIBUTING.md` in the
 repository root.
 
-You do **not** need to write code. Ideas, bug reports, and wiki pages all count. The
-game is **18+**; contributors must be adults.
+You do **not** need to write code. Ideas, bug reports, and wiki pages all count.
 
 ## Where things go
 

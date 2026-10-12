@@ -112,4 +112,4 @@ after the image payload and is **keyed to the original filename**. Rules:
 To add a shot, append a block to the label:
 `call screen wiki_shot_frame("<name>", "<screen>", *screen_args)`. The wrapper
 takes the picture with a timer, which also works for modal screens. Only capture
-UI screens. No event scenes (spoilers, adult content).
+UI screens, no event scenes.

@@ -301,14 +301,14 @@ problems don't solve themselves. Rate `0` = no wear.
 ### b) Stat weights (`stat_weights`)
 
 This is the coupling to the **global school stats** (Happiness, Education,
-Corruption, Inhibition, Charm, Reputation, …). When such a stat changes in the
+Motivation, Shyness, Charm, Reputation, …). When such a stat changes in the
 game, the change — multiplied by the weight — is transferred to the bar:
 
 ```python
-Bar("main", stat_weights={HAPPINESS: 0.5, INHIBITION: -0.8})
+Bar("main", stat_weights={HAPPINESS: 0.5, SHYNESS: -0.8})
 ```
 
-If Happiness rises by 10, `main` moves by +5. If Inhibition drops by 10, `main`
+If Happiness rises by 10, `main` moves by +5. If Shyness drops by 10, `main`
 moves by +8 (a negative weight inverts the direction). This lets the Situation
 respond organically to whatever the player is already doing at the school.
 
@@ -1362,7 +1362,7 @@ for using it well:
   somehow improved, even though I did nothing specific for it." Real positive
   progress still comes from active play (measures, events).
 - **Invert where it makes sense.** A negative weight flips direction — e.g. falling
-  Inhibition *helping* a conflict defuse: `stat_weights={INHIBITION: -0.8}`.
+  Shyness *helping* a conflict defuse: `stat_weights={SHYNESS: -0.8}`.
 - **Differentiate per bar in multi-bar Situations.** Education can weigh more on the
   `teachers` bar than on `parents`, etc., so different stats pull different factions.
 

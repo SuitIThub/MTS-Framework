@@ -2096,10 +2096,10 @@ screen journal_cheats(display, char = "school"):
                     use journal_cheats_stat(LEVEL, "parent")
                     use journal_cheats_stat(LEVEL, "teacher")
                     use journal_cheats_stat(LEVEL, "secretary")
-                    # CORRUPTION
-                    use journal_cheats_stat(CORRUPTION, "school")
-                    # INHIBITION
-                    use journal_cheats_stat(INHIBITION, "school")
+                    # MOTIVATION
+                    use journal_cheats_stat(MOTIVATION, "school")
+                    # SHYNESS
+                    use journal_cheats_stat(SHYNESS, "school")
                     # HAPPINESS
                     use journal_cheats_stat(HAPPINESS, "school")
                     # EDUCATION

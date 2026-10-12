@@ -323,9 +323,9 @@ init -6 python:
             
             limit_value = -1
 
-            if self.get_name() == CORRUPTION:
+            if self.get_name() == MOTIVATION:
                 limit_value = clamp_value(100, 0, level * 10)
-            elif self.get_name() == INHIBITION:
+            elif self.get_name() == SHYNESS:
                 limit_value = clamp_value(0, 100 - (level * 10), 100)
 
             if stat_value == limit_value:
@@ -353,7 +353,7 @@ init -6 python:
             text = ""
 
 
-            if (self.get_name() != INHIBITION):
+            if (self.get_name() != SHYNESS):
                 if change < 0:
                     text = "{color=#a00000}{size=15}" + str(change) + "{/size}{/color}"
                 elif change > 0:
@@ -606,7 +606,7 @@ init -6 python:
             """
             Returns the available range of the stat based on the school level.
 
-            Corruption and Inhibition are gated by school level: each level unlocks
+            Motivation and Shyness are gated by school level: each level unlocks
             10 points of the 0-100 scale. Other stats return the full range.
 
             ### Parameters:
@@ -620,7 +620,7 @@ init -6 python:
 
             full_range = self.get_full_range()
 
-            if self.type in (CORRUPTION, INHIBITION):
+            if self.type in (MOTIVATION, SHYNESS):
                 return int(clamp_value(level * (full_range / 10), 0, full_range))
 
             return full_range
@@ -664,7 +664,7 @@ init -6 python:
         """
         Clamps the given value between the min and max limit of the stat.
         The min and max limit are calculated based on the level of the school.
-        Exceptions are the corruption and inhibition stat. 
+        Exceptions are the motivation and shyness stat. 
         For these stats the min and max limit are calculated based on the level of the school.
 
         ### Parameters:
@@ -684,9 +684,9 @@ init -6 python:
             - The clamped value.
         """
 
-        if stat == CORRUPTION:
+        if stat == MOTIVATION:
             return clamp_value(value, min, level * (max / 10))
-        elif stat == INHIBITION:
+        elif stat == SHYNESS:
             return clamp_value(value, 100 - (level * (max / 10)), max)
         else:
             return clamp_value(value, min, max)
@@ -846,22 +846,22 @@ init -6 python:
 
 label load_stats ():
 
-    $ load_stat_data(CORRUPTION, "Corruption", {
-        'description': ["Example stat. Describe what corruption means in your game and how the player raises it.",
-            ("\nThis stat is currently capped and cannot be further increased until the level of the school is increased.", StatLimitCondition(CORRUPTION))],
+    $ load_stat_data(MOTIVATION, "Motivation", {
+        'description': ["Example stat. Describe what motivation means in your game and how the player raises it.",
+            ("\nThis stat is currently capped and cannot be further increased until the level of the school is increased.", StatLimitCondition(MOTIVATION))],
         'levels': [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         'descriptions': [
-            "Corruption level 0 description.",
-            "Corruption level 1 description.",
-            "Corruption level 2 description.",
-            "Corruption level 3 description.",
-            "Corruption level 4 description.",
-            "Corruption level 5 description.",
-            "Corruption level 6 description.",
-            "Corruption level 7 description.",
-            "Corruption level 8 description.",
-            "Corruption level 9 description.",
-            "Corruption level 10 description.",
+            "Motivation level 0 description.",
+            "Motivation level 1 description.",
+            "Motivation level 2 description.",
+            "Motivation level 3 description.",
+            "Motivation level 4 description.",
+            "Motivation level 5 description.",
+            "Motivation level 6 description.",
+            "Motivation level 7 description.",
+            "Motivation level 8 description.",
+            "Motivation level 9 description.",
+            "Motivation level 10 description.",
         ],
         'images': [
             "images/journal/empty_image.webp",
@@ -877,22 +877,22 @@ label load_stats ():
             "images/journal/empty_image.webp",
         ],})
 
-    $ load_stat_data(INHIBITION, "Inhibition", {
-        'description': ["Example stat. Describe what inhibition means in your game and how the player lowers it.",
-            ("\nThis stat is currently capped and cannot be further decreased until the level of the school is increased.", StatLimitCondition(INHIBITION))],
+    $ load_stat_data(SHYNESS, "Shyness", {
+        'description': ["Example stat. Describe what shyness means in your game and how the player lowers it.",
+            ("\nThis stat is currently capped and cannot be further decreased until the level of the school is increased.", StatLimitCondition(SHYNESS))],
         'levels': [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         'descriptions': [
-            "Inhibition level 0 description.",
-            "Inhibition level 1 description.",
-            "Inhibition level 2 description.",
-            "Inhibition level 3 description.",
-            "Inhibition level 4 description.",
-            "Inhibition level 5 description.",
-            "Inhibition level 6 description.",
-            "Inhibition level 7 description.",
-            "Inhibition level 8 description.",
-            "Inhibition level 9 description.",
-            "Inhibition level 10 description.",
+            "Shyness level 0 description.",
+            "Shyness level 1 description.",
+            "Shyness level 2 description.",
+            "Shyness level 3 description.",
+            "Shyness level 4 description.",
+            "Shyness level 5 description.",
+            "Shyness level 6 description.",
+            "Shyness level 7 description.",
+            "Shyness level 8 description.",
+            "Shyness level 9 description.",
+            "Shyness level 10 description.",
         ],
         'images': [
             "images/journal/empty_image.webp",

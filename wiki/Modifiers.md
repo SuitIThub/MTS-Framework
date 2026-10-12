@@ -20,8 +20,8 @@ The **collection** decides *when* it acts:
 # +2 Happiness every in-game day (recurring drift), via a ModifierEffect:
 ModifierEffect("morale_boost", HAPPINESS, Modifier_Obj("morale_boost", "+", 2), "daily")
 
-# Scale all incoming Corruption changes by 1.5x while active (transform-on-change):
-ModifierEffect("corruption_amp", CORRUPTION, Modifier_Obj("corruption_amp", "*", 1.5), "default")
+# Scale all incoming Motivation changes by 1.5x while active (transform-on-change):
+ModifierEffect("motivation_amp", MOTIVATION, Modifier_Obj("motivation_amp", "*", 1.5), "default")
 ```
 
 - **`default`** collection → transforms stat *changes* as they happen.
@@ -60,7 +60,7 @@ Modifiers live in **collections**: a two-level map `collection → stat → {nam
 Modifier_Obj}`. They never change a stat by themselves — they are consulted when the
 stat system computes a change, and they add their contribution.
 
-The target can be a **school stat** (`HAPPINESS`, `CORRUPTION`, …) or a **situation
+The target can be a **school stat** (`HAPPINESS`, `MOTIVATION`, …) or a **situation
 bar** via the pseudo-stat key `situation:<situation_key>:<bar_key>` (see §6).
 
 ---

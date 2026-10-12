@@ -512,7 +512,7 @@ register_unlockables(
 
         # --- Custom faction bars with preview pictograms (override defaults) ---
         Bar("Students", Picto("students_support"), limits=(0, 100),
-            stat_weights={INHIBITION: 0.4}),
+            stat_weights={SHYNESS: 0.4}),
         Bar("Parents",  Picto("parents_support"),  limits=(0, 100),
             stat_weights={REPUTATION: 0.4}),
         Bar("Teachers", Picto("teachers_support"), limits=(0, 100),

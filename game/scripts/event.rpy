@@ -2322,7 +2322,7 @@ label start_sandbox (**kwargs):
     # This label starts the sandbox movie mode
     #
     # ### Parameters:
-    # 1. naughty_map: Dict[str, Dict[str, List[str]]]
+    # 1. scene_map: Dict[str, Dict[str, List[str]]]
     #     - A mapping that defines what actions can be performed in what locations and what clothing can be worn.
     #    - The first key is the location, the second key is the position, and the value is a list of clothing options.
     # 2. level: int
@@ -2345,32 +2345,32 @@ label .after_check (**kwargs):
 
     $ kwargs = sandbox_data
 
-    $ naughty_map = get_kwargs('naughty_map', **kwargs)
-    $ cum_map = get_kwargs('cum_map', **kwargs)
+    $ scene_map = get_kwargs('scene_map', **kwargs)
+    $ finale_map = get_kwargs('finale_map', **kwargs)
     $ level = get_kwargs('level', **kwargs)
 
-    $ kwargs['naughty_location'] = list(naughty_map.keys())[0]
-    $ kwargs['naughty_position'] = list(naughty_map[get_kwargs('naughty_location', **kwargs)].keys())[0]
-    $ kwargs['naughty_clothing'] = naughty_map[get_kwargs('naughty_location', **kwargs)][get_kwargs('naughty_position', **kwargs)][0]
-    $ kwargs['is_cumming'] = False
-    $ kwargs['naughty_variant'] = 0
+    $ kwargs['scene_location'] = list(scene_map.keys())[0]
+    $ kwargs['scene_position'] = list(scene_map[get_kwargs('scene_location', **kwargs)].keys())[0]
+    $ kwargs['scene_clothing'] = scene_map[get_kwargs('scene_location', **kwargs)][get_kwargs('scene_position', **kwargs)][0]
+    $ kwargs['is_finale'] = False
+    $ kwargs['scene_variant'] = 0
     $ kwargs['no_gallery'] = True
     $ kwargs['override_menu_exit'] = None
     $ kwargs['override_menu_exit_with_kwargs'] = "start_sandbox.start"
-    $ kwargs['naughty_level'] = level
+    $ kwargs['scene_level'] = level
 
 
     call .start( **kwargs) from _call_start_sandbox_start
 
 label .start (**kwargs):
 
-    $ location = get_kwargs('naughty_location', **kwargs)
-    $ position = get_kwargs('naughty_position', **kwargs)
-    $ clothing = get_kwargs('naughty_clothing', **kwargs)
-    $ variant = get_kwargs('naughty_variant', **kwargs)
-    $ is_cumming = get_kwargs('is_cumming', **kwargs)
-    $ mapping = get_kwargs('naughty_map', **kwargs)
-    $ cum_map = get_kwargs('cum_map', **kwargs)
+    $ location = get_kwargs('scene_location', **kwargs)
+    $ position = get_kwargs('scene_position', **kwargs)
+    $ clothing = get_kwargs('scene_clothing', **kwargs)
+    $ variant = get_kwargs('scene_variant', **kwargs)
+    $ is_finale = get_kwargs('is_finale', **kwargs)
+    $ mapping = get_kwargs('scene_map', **kwargs)
+    $ finale_map = get_kwargs('finale_map', **kwargs)
 
 
     if position not in mapping[location]:
@@ -2380,8 +2380,8 @@ label .start (**kwargs):
         $ clothing = mapping[location][position][0]
 
     $ file_preset = get_kwargs('file_preset', **kwargs)
-    if is_cumming:
-        $ file_preset = file_preset.replace('.webm', '_cum.webm')
+    if is_finale:
+        $ file_preset = file_preset.replace('.webm', '_finale.webm')
 
     $ file = file_preset.replace('<location>', location).replace('<position>', position).replace('<clothing>', clothing)
     $ max_variant = get_file_max_value('variant', file, 0, 100)
@@ -2390,18 +2390,18 @@ label .start (**kwargs):
         $ variant = 0
 
     $ movie_preset = get_kwargs('movie_preset', **kwargs)
-    if is_cumming:
+    if is_finale:
         $ movie_preset = movie_preset + "_cum_idle"
 
     $ movie = movie_preset.replace('<location>', location).replace('<position>', position).replace('<clothing>', clothing).replace('<variant>', str(variant))
 
-    if is_cumming:
-        $ idle_movie = movie.replace('cum_idle', 'cum')
-        $ idle_file = file.replace('cum', 'cum_idle').replace('<variant>', str(variant))
+    if is_finale:
+        $ idle_movie = movie.replace('finale_idle', 'finale')
+        $ idle_file = file.replace('finale', 'finale_idle').replace('<variant>', str(variant))
         $ hide_all()
         # $ renpy.movie_cutscene(idle_file, None, 0)
         scene expression idle_movie with dissolveM
-        $ renpy.pause(cum_map[location][position][clothing])
+        $ renpy.pause(finale_map[location][position][clothing])
         $ hide_all()
 
     # play movies
@@ -2422,13 +2422,13 @@ label .start (**kwargs):
     if max_variant > 0:
         $ icons.append("variant")
 
-    if location in cum_map.keys() and position in cum_map[location].keys() and clothing in cum_map[location][position].keys() and not is_cumming:
-        $ icons.append("cumming")
+    if location in finale_map.keys() and position in finale_map[location].keys() and clothing in finale_map[location][position].keys() and not is_finale:
+        $ icons.append("finale")
 
-    if location in cum_map.keys() and position in cum_map[location].keys() and clothing in cum_map[location][position].keys() and is_cumming:
+    if location in finale_map.keys() and position in finale_map[location].keys() and clothing in finale_map[location][position].keys() and is_finale:
         $ icons.append("return")
 
-    call screen naughty_scene_icons(*icons)
+    call screen sandbox_scene_icons(*icons)
     if _return == "change_location":
         call .change_location (**kwargs) from _call_start_sandbox_change_location
     elif _return == "change_position":
@@ -2437,43 +2437,43 @@ label .start (**kwargs):
         call .change_clothing (**kwargs) from _call_start_sandbox_change_clothing
     elif _return == "change_variant":
         call .change_variant (**kwargs) from _call_start_sandbox_change_variant
-    elif _return == "cum":
-        call .trigger_cum (**kwargs) from _call_start_sandbox_trigger_cum
+    elif _return == "finale":
+        call .trigger_finale (**kwargs) from _call_start_sandbox_trigger_finale
     elif _return == "return":
-        call .return_cum (**kwargs) from _call_start_sandbox_return_cum
+        call .return_finale (**kwargs) from _call_start_sandbox_return_finale
     elif _return == "stop":
         $ end_event('new_daytime', **kwargs)
 
 label .change_location (**kwargs):
     $ elements = []
 
-    $ kwargs['is_cumming'] = False
+    $ kwargs['is_finale'] = False
 
     python:
         for location in mapping.keys():
-            elements.append(MenuElement(location, get_translation(location), ChangeKwargsEffect('naughty_location', location)))
+            elements.append(MenuElement(location, get_translation(location), ChangeKwargsEffect('scene_location', location)))
 
     $ call_custom_menu_with_text("Where do you want to move to?", get_kwargs('character', character.subtitles, **kwargs), False, *elements, **kwargs)
 
 label .change_position (**kwargs):
-    $ location = get_kwargs('naughty_location', **kwargs)
-    $ mapping = get_kwargs('naughty_map', **kwargs)
+    $ location = get_kwargs('scene_location', **kwargs)
+    $ mapping = get_kwargs('scene_map', **kwargs)
 
-    $ kwargs['is_cumming'] = False
+    $ kwargs['is_finale'] = False
 
     $ elements = []
     python:
         for position in mapping[location].keys():
-            elements.append(MenuElement(position, get_translation(position), ChangeKwargsEffect('naughty_position', position)))
+            elements.append(MenuElement(position, get_translation(position), ChangeKwargsEffect('scene_position', position)))
 
     $ call_custom_menu_with_text("What do you want to do next?", get_kwargs('character', character.subtitles, **kwargs), False, *elements, **kwargs)
 
 label .change_clothing (**kwargs):
-    $ location = get_kwargs('naughty_location', **kwargs)
-    $ position = get_kwargs('naughty_position', **kwargs)
-    $ mapping = get_kwargs('naughty_map', **kwargs)
+    $ location = get_kwargs('scene_location', **kwargs)
+    $ position = get_kwargs('scene_position', **kwargs)
+    $ mapping = get_kwargs('scene_map', **kwargs)
 
-    $ kwargs['is_cumming'] = False
+    $ kwargs['is_finale'] = False
 
     $ elements = []
     python:
@@ -2484,45 +2484,45 @@ label .change_clothing (**kwargs):
                 if level < clothing_level:
                     continue
 
-            elements.append(MenuElement(clothing, get_translation(clothing), ChangeKwargsEffect('naughty_clothing', clothing)))
+            elements.append(MenuElement(clothing, get_translation(clothing), ChangeKwargsEffect('scene_clothing', clothing)))
 
     $ call_custom_menu_with_text("What do you want me to wear?", get_kwargs('character', character.subtitles, **kwargs), False, *elements, **kwargs)
 
 label .change_variant (**kwargs):
-    $ location = get_kwargs('naughty_location', **kwargs)
-    $ position = get_kwargs('naughty_position', **kwargs)
-    $ clothing = get_kwargs('naughty_clothing', **kwargs)
-    $ variant = get_kwargs('naughty_variant', **kwargs)
+    $ location = get_kwargs('scene_location', **kwargs)
+    $ position = get_kwargs('scene_position', **kwargs)
+    $ clothing = get_kwargs('scene_clothing', **kwargs)
+    $ variant = get_kwargs('scene_variant', **kwargs)
 
-    $ kwargs['is_cumming'] = False
+    $ kwargs['is_finale'] = False
 
     $ file = get_kwargs('file_preset', **kwargs).replace('<location>', location).replace('<position>', position).replace('<clothing>', clothing)
     $ max_variant = get_file_max_value('variant', file, 0, 100)
     $ variant += 1
     if variant > max_variant:
         $ variant = 0
-    $ kwargs['naughty_variant'] = variant
+    $ kwargs['scene_variant'] = variant
     call .start(**kwargs) from _call_start_sandbox_start_1
 
-label .trigger_cum (**kwargs):
-    $ location = get_kwargs('naughty_location', **kwargs)
-    $ position = get_kwargs('naughty_position', **kwargs)
-    $ clothing = get_kwargs('naughty_clothing', **kwargs)
-    $ variant = get_kwargs('naughty_variant', **kwargs)
-    $ kwargs["is_cumming"] = True
+label .trigger_finale (**kwargs):
+    $ location = get_kwargs('scene_location', **kwargs)
+    $ position = get_kwargs('scene_position', **kwargs)
+    $ clothing = get_kwargs('scene_clothing', **kwargs)
+    $ variant = get_kwargs('scene_variant', **kwargs)
+    $ kwargs["is_finale"] = True
 
-    $ file = get_kwargs('file_preset', **kwargs).replace('<location>', location).replace('<position>', position).replace('<clothing>', clothing).replace('.webm', '_cum.webm')
+    $ file = get_kwargs('file_preset', **kwargs).replace('<location>', location).replace('<position>', position).replace('<clothing>', clothing).replace('.webm', '_finale.webm')
     $ max_variant = get_file_max_value('variant', file, 0, 100)
     if variant > max_variant:
         $ variant = max_variant
     call .start(**kwargs) from _call_start_sandbox_start_2
 
-label .return_cum (**kwargs):
-    $ location = get_kwargs('naughty_location', **kwargs)
-    $ position = get_kwargs('naughty_position', **kwargs)
-    $ clothing = get_kwargs('naughty_clothing', **kwargs)
-    $ variant = get_kwargs('naughty_variant', **kwargs)
-    $ kwargs["is_cumming"] = False
+label .return_finale (**kwargs):
+    $ location = get_kwargs('scene_location', **kwargs)
+    $ position = get_kwargs('scene_position', **kwargs)
+    $ clothing = get_kwargs('scene_clothing', **kwargs)
+    $ variant = get_kwargs('scene_variant', **kwargs)
+    $ kwargs["is_finale"] = False
 
     $ file = get_kwargs('file_preset', **kwargs).replace('<location>', location).replace('<position>', position).replace('<clothing>', clothing)
     $ max_variant = get_file_max_value('variant', file, 0, 100)
@@ -2530,7 +2530,7 @@ label .return_cum (**kwargs):
         $ variant = max_variant
     call .start(**kwargs) from _call_start_sandbox_start_3
 
-screen naughty_scene_icons(*icons):
+screen sandbox_scene_icons(*icons):
     if "clothing" in icons:
         imagebutton:
             idle "icons/change_clothing_idle.webp"
@@ -2555,12 +2555,12 @@ screen naughty_scene_icons(*icons):
             hover "icons/change_variant_hover.webp"
             xalign 1.0 yalign 0.6
             action Return("change_variant")
-    if "cumming" in icons:
+    if "finale" in icons:
         imagebutton:
-            idle "icons/cum_idle.webp"
-            hover "icons/cum_hover.webp"
+            idle "icons/finale_idle.webp"
+            hover "icons/finale_hover.webp"
             xalign 1.0 yalign 0.8
-            action Return("cum")
+            action Return("finale")
     if "return" in icons:
         imagebutton:
             idle "icons/return_idle.webp"

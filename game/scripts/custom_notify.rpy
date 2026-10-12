@@ -147,7 +147,7 @@ init -99 python:
 
             notify_str = char_name + ": " + get_stat_icon(Stat_Data[stat].get_title(), size = ICON_XSMALL)
             notify_val = " {color=#00a000}" + "{:.2f}".format(value) + "{/color}"
-            if ((value > 0 and stat == "inhibition") or (value < 0 and stat != "inhibition")):
+            if ((value > 0 and stat == "shyness") or (value < 0 and stat != "shyness")):
                 notify_val = " {color=#a00000}" + "{:.2f}".format(value) + "{/color}"
             add_notify_message(notify_str + " " + notify_val)
 

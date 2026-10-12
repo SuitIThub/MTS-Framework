@@ -20,7 +20,7 @@ the event can read:
 SelectorSet(
     CharacterSelector("char"),                      # pick the acting character → kwargs["char"]
     RandomValueSelector("variant", 1, 4),           # random 1..4 → kwargs["variant"]
-    StatSelector("corr", CORRUPTION, "char", [0, 100]),  # a stat reading (+ "corr_range")
+    StatSelector("motiv", MOTIVATION, "char", [0, 100]),  # a stat reading (+ "motiv_range")
 )
 ```
 

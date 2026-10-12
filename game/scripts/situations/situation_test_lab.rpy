@@ -104,7 +104,7 @@ init 1 python:
                     StartModifier("+", 0.02, stat=HAPPINESS),
                     StartModifier("range_percent", 2),
                 ],
-                stat_weights={HAPPINESS: 0.5, INHIBITION: -0.3},
+                stat_weights={HAPPINESS: 0.5, SHYNESS: -0.3},
                 regular_decrease_rate=-0.5,
             ),
             Bar("side",
@@ -409,7 +409,7 @@ init 1 python:
 
         stats = {
             "happiness": float(get_stat_number(HAPPINESS)),
-            "inhibition": float(get_stat_number(INHIBITION)),
+            "shyness": float(get_stat_number(SHYNESS)),
             "education": float(get_stat_number(EDUCATION)),
         }
         # What the daily / daytime modifier tick would add to Happiness right now.
@@ -437,7 +437,7 @@ init 1 python:
         ] + bar_lines + [
             f"Passive: {situation.active_passive or '-'}   Measure: {situation.active_measure or '-'}",
             f"Teasers active: {sum(1 for t in situation.teasers.values() if t.active)}/{len(situation.teasers)}",
-            f"Stats: Happiness {fmt(stats['happiness'])}   Inhibition {fmt(stats['inhibition'])}   Education {fmt(stats['education'])}",
+            f"Stats: Happiness {fmt(stats['happiness'])}   Shyness {fmt(stats['shyness'])}   Education {fmt(stats['education'])}",
             f"Happiness modifiers per day: {fmt(daily_happiness)}   per daytime: {fmt(daytime_happiness)}",
             f"Resolution breather: {breather} (pauses base wear)",
             f"Paused: {pause_text}   paused daytimes total: {situation.get_paused_daytimes()}",

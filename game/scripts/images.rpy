@@ -181,8 +181,8 @@ init -2 python:
     image_code = -1
     last_image_code = -1
     last_image = ""
-    last_image_nude = 0
-    last_current_nude = 0
+    last_image_outfit_level = 0
+    last_current_outfit_level = 0
 
     ########################
     # region CLASSES ----- #
@@ -321,13 +321,13 @@ init -2 python:
             if image_path == "":
                 return None
 
-            if "<nude>" in image_path:
-                nude, resolved = get_image(image_path)
-                if nude < 0:
+            if "<outfit_level>" in image_path:
+                outfit_level, resolved = get_image(image_path)
+                if outfit_level < 0:
                     return None
-                # Prefer clothed (0); otherwise use the highest available nude level.
-                for level in [0] + list(range(nude, 0, -1)):
-                    candidate = find_loadable_image(resolved.replace("<nude>", str(level)))
+                # Prefer clothed (0); otherwise use the highest available outfit level.
+                for level in [0] + list(range(outfit_level, 0, -1)):
+                    candidate = find_loadable_image(resolved.replace("<outfit_level>", str(level)))
                     if candidate != "":
                         return candidate
                 return None
@@ -336,12 +336,12 @@ init -2 python:
             if resolved_concrete != "":
                 return resolved_concrete
 
-            nude, resolved = get_image(image_path)
-            if nude < 0 or resolved == "":
+            outfit_level, resolved = get_image(image_path)
+            if outfit_level < 0 or resolved == "":
                 return None
-            if "<nude>" in resolved:
-                for level in [0] + list(range(nude, 0, -1)):
-                    candidate = find_loadable_image(resolved.replace("<nude>", str(level)))
+            if "<outfit_level>" in resolved:
+                for level in [0] + list(range(outfit_level, 0, -1)):
+                    candidate = find_loadable_image(resolved.replace("<outfit_level>", str(level)))
                     if candidate != "":
                         return candidate
                 return None
@@ -372,7 +372,7 @@ init -2 python:
                             variant = get_image_max_value_with_alternatives("<variant>", [image_step], 1)
                             if variant == 0:
                                 continue
-                        elif find_loadable_image(image_step.replace('<nude>', '0')) == "":
+                        elif find_loadable_image(image_step.replace('<outfit_level>', '0')) == "":
                             continue
                         
 
@@ -594,8 +594,8 @@ init -2 python:
                 - The keyword arguments to replace in the image path.
 
             ### Returns:
-            1. nude: int
-                - The highest available nude-level.
+            1. outfit_level: int
+                - The highest available outfit level.
             2. image_path: str
                 - The image path of the background image.
             """
@@ -610,10 +610,10 @@ init -2 python:
                 for key in combination:
                     new_image_path = new_image_path.replace(f"<{key}>", "$")
 
-                (nude, image_path) = get_image(self._path_prefix + new_image_path, **kwargs)
+                (outfit_level, image_path) = get_image(self._path_prefix + new_image_path, **kwargs)
 
-                if nude != -1:
-                    return nude, image_path
+                if outfit_level != -1:
+                    return outfit_level, image_path
 
             return -1, self._path_prefix + self._image_path
 
@@ -788,7 +788,7 @@ init -2 python:
         Returns the image path with the given keyword arguments replaced.
         The <variant>-keyword will be replaced with a random variant when it is not specified in kwargs.
         The <level>-keyword will be replaced with the best available level when it is not specified in kwargs.
-        The <nude>-keyword will be checked for the highest available nude-level and returned.
+        The <outfit_level>-keyword will be checked for the highest available outfit level and returned.
 
         ### Parameters:
         1. image_path: str
@@ -797,8 +797,8 @@ init -2 python:
             - The keyword arguments to replace in the image path.
 
         ### Returns:
-        1. nude: int
-            - The highest available nude-level.
+        1. outfit_level: int
+            - The highest available outfit level.
         2. image_path: str
             - The image path with the given keyword arguments replaced.
         """
@@ -818,7 +818,7 @@ init -2 python:
         if '<level>' in image_path:
             image_path = get_available_level(image_path, get_kwargs('level', 0, **kwargs))
 
-        if "<nude>" not in image_path:
+        if "<outfit_level>" not in image_path:
             resolved = find_loadable_image(image_path)
             if resolved != "":
                 return 0, resolved
@@ -827,8 +827,8 @@ init -2 python:
                 return -1, image_path
 
         last_found = ""
-        for i in range(0, nude_vision):
-            new_image_path = image_path.replace("<nude>", str(i))
+        for i in range(0, outfit_level_limit):
+            new_image_path = image_path.replace("<outfit_level>", str(i))
             found = find_loadable_image(new_image_path)
             if found == "":
                 if i > 0:
@@ -842,7 +842,7 @@ init -2 python:
 
         if last_found != "":
             image_path = replace_image_extension(image_path, last_found)
-        return nude_vision, image_path
+        return outfit_level_limit, image_path
             
     def get_background(fallback: str, images: List[BGImage], **kwargs) -> Tuple[int, str]:
         """
@@ -857,34 +857,34 @@ init -2 python:
             - The keyword arguments to check the conditions with.
 
         ### Returns:
-        1. nude: int
-            - The highest available nude-level.
+        1. outfit_level: int
+            - The highest available outfit level.
         2. image_path: str
             - The image path of the background with the highest priority that can be used.
         """
 
         output_image = None
-        output_nude = 0
+        output_outfit_level = 0
         priority = -1
 
         for bgimage in images:
             if not bgimage.can_be_used(**kwargs):
                 continue
 
-            max_nude, output = bgimage.get_image(**kwargs)
-            if max_nude == -1:
+            max_outfit_level, output = bgimage.get_image(**kwargs)
+            if max_outfit_level == -1:
                 continue
 
-            if priority < bgimage.get_priority() and max_nude >= 0:
+            if priority < bgimage.get_priority() and max_outfit_level >= 0:
                 output_image = output
-                output_nude = max_nude
+                output_outfit_level = max_outfit_level
                 priority = bgimage.get_priority()
         
 
         if output_image == None:
             return 0, fallback
         else:
-            return output_nude, output_image
+            return output_outfit_level, output_image
 
     # endregion
     #######################
@@ -1077,7 +1077,7 @@ init -2 python:
 
         Each fully resolved candidate (no remaining ``<placeholders>``) is
         also tried with the alternate image extension (``.png`` ↔ ``.webp``).
-        Incomplete templates such as ``<step>`` / ``<nude>`` stay unchanged so
+        Incomplete templates such as ``<step>`` / ``<outfit_level>`` stay unchanged so
         later probing can fill them in. List order and length are preserved:
         fewer ``$`` still means higher priority.
 
@@ -1329,7 +1329,7 @@ init -2 python:
         Returns ``path`` with the image extension taken from ``like_path``.
 
         Used so a pattern ending in ``.png`` can keep remaining placeholders
-        (``<nude>``, ``<step>``) while matching a file that exists as ``.webp``.
+        (``<outfit_level>``, ``<step>``) while matching a file that exists as ``.webp``.
 
         ### Parameters:
         1. path: str
@@ -1677,18 +1677,18 @@ label show_idle_image(bg_images, **kwargs):
     if last_image_code != image_code:
         $ last_image_code = image_code
 
-        $ max_nude, image_path = get_background(fallback_image, images, **kwargs)
-        $ current_nude = DEFAULT_NUDE
+        $ max_outfit_level, image_path = get_background(fallback_image, images, **kwargs)
+        $ current_outfit_level = DEFAULT_OUTFIT_LEVEL
 
         $ last_image = image_path
-        $ last_image_nude = max_nude
-        $ last_current_nude = current_nude
+        $ last_image_outfit_level = max_outfit_level
+        $ last_current_outfit_level = current_outfit_level
     else:
-        $ max_nude = last_image_nude
+        $ max_outfit_level = last_image_outfit_level
         $ image_path = last_image
-        $ current_nude = last_current_nude
+        $ current_outfit_level = last_current_outfit_level
 
-    call show_image_with_nude_var (image_path, max_nude, current_nude) from show_idle_image_1
+    call show_image_with_outfit_var (image_path, max_outfit_level, current_outfit_level) from show_idle_image_1
 
     return
 
@@ -1722,8 +1722,8 @@ label show_ready_image(path, display_type = SCENE):
     #     - The display type of the image.
     # """
 
-    if "<nude>" in path:
-        call show_ext_image_with_nude_var(path) from _call_show_ext_image_with_nude_var
+    if "<outfit_level>" in path:
+        call show_ext_image_with_outfit_var(path) from _call_show_ext_image_with_outfit_var
     else:
         $ resolved = find_loadable_image(path)
         if resolved != "":
@@ -1735,10 +1735,10 @@ label show_ready_image(path, display_type = SCENE):
             $ log(f"'{path}' could not be found!", log_type="error", category="image")
     return
 
-label show_ext_image_with_nude_var(image_path, **kwargs):
+label show_ext_image_with_outfit_var(image_path, **kwargs):
     # """
     # Shows an image with the given path and keyword arguments.
-    # This method shows the image in a special way where a button is shown to switch between the different nude versions of the image.
+    # This method shows the image in a special way where a button is shown to switch between the different outfit versions of the image.
 
     # ### Parameters:
     # 1. image_path: str
@@ -1747,34 +1747,34 @@ label show_ext_image_with_nude_var(image_path, **kwargs):
     #     - The keyword arguments to replace in the image path.
     # """
 
-    $ nude, ext_image = get_image(image_path, **kwargs)
-    call show_image_with_nude_var(ext_image, nude) from show_ext_image_with_nude_var_1
+    $ outfit_level, ext_image = get_image(image_path, **kwargs)
+    call show_image_with_outfit_var(ext_image, outfit_level) from show_ext_image_with_outfit_var_1
     return
 
-label show_image_with_nude_var(image_path, limit = 0, nude = DEFAULT_NUDE):
+label show_image_with_outfit_var(image_path, limit = 0, outfit_level = DEFAULT_OUTFIT_LEVEL):
     # """
-    # Is used to display an image with nude variants.
-    # DO NOT USE THIS METHOD DIRECTLY! Use show_ext_image_with_nude_var instead!
+    # Is used to display an image with outfit variants.
+    # DO NOT USE THIS METHOD DIRECTLY! Use show_ext_image_with_outfit_var instead!
 
     # ### Parameters:
     # 1. image_path: str
     #     - The image path to show.
     # 2. limit: int (default 0)
-    #     - The highest nude level to show.
+    #     - The highest outfit level to show.
     # """
 
-    if limit > nude_vision:
-        $ limit = nude_vision
+    if limit > outfit_level_limit:
+        $ limit = outfit_level_limit
 
     $ paths = []
     $ image_not_found = False
 
     python:
         for i in range(0, limit + 1):
-            candidate = image_path.replace("<nude>", str(i))
+            candidate = image_path.replace("<outfit_level>", str(i))
             resolved = find_loadable_image(candidate)
             if len(paths) == 0 and resolved == "":
-                log(f"'{image_path}' is missing nude version images!", log_type="error", category="image")
+                log(f"'{image_path}' is missing outfit version images!", log_type="error", category="image")
                 image_not_found = True
                 break
             paths.append(resolved if resolved != "" else candidate)
@@ -1782,73 +1782,73 @@ label show_image_with_nude_var(image_path, limit = 0, nude = DEFAULT_NUDE):
     if image_not_found:
         return
 
-    call call_screen_image_with_nude_var (paths, limit, nude) from show_image_with_nude_var_1
+    call call_screen_image_with_outfit_var (paths, limit, outfit_level) from show_image_with_outfit_var_1
 
     return
 
-label call_screen_image_with_nude_var(paths, limit = 2, nude = DEFAULT_NUDE):
+label call_screen_image_with_outfit_var(paths, limit = 2, outfit_level = DEFAULT_OUTFIT_LEVEL):
     # """
-    # Calls the screen image_with_nude_var with the given paths, limit and nude level.
+    # Calls the screen image_with_outfit_var with the given paths, limit and outfit level.
 
     # ### Parameters:
     # 1. paths: List[str]
     #     - A list of all the image paths.
     # 2. limit: int (default 2)
-    #     - The highest nude level to show.
-    # 3. nude: int (default 2)
-    #     - The current nude level.
+    #     - The highest outfit level to show.
+    # 3. outfit_level: int (default 2)
+    #     - The current outfit level.
     # """
 
-    $ last_current_nude = nude
+    $ last_current_outfit_level = outfit_level
 
-    show screen image_with_nude_var(paths, limit, nude) with dissolveM
+    show screen image_with_outfit_var(paths, limit, outfit_level) with dissolveM
     return
 
-screen image_with_nude_var(paths, limit = 2, nude = DEFAULT_NUDE):
+screen image_with_outfit_var(paths, limit = 2, outfit_level = DEFAULT_OUTFIT_LEVEL):
     # """
-    # Shows the image with a button to switch between the different nude versions.
+    # Shows the image with a button to switch between the different outfit versions.
 
     # ### Parameters:
     # 1. paths: List[str]
     #     - A list of all the image paths.
     # 2. limit: int (default 2)
-    #     - The highest nude level to show.
-    # 3. nude: int (default 0)
-    #     - The current nude level.
+    #     - The highest outfit level to show.
+    # 3. outfit_level: int (default 0)
+    #     - The current outfit level.
     # """
     tag background
     
-    if len(paths) <= nude:
-        $ nude = len(paths) - 1
+    if len(paths) <= outfit_level:
+        $ outfit_level = len(paths) - 1
 
-    if limit < nude:
-        $ nude = limit
+    if limit < outfit_level:
+        $ outfit_level = limit
 
-    $ path = find_loadable_image(paths[nude])
+    $ path = find_loadable_image(paths[outfit_level])
 
     if path != "":
         image "[path]"
 
-    if nude_vision != 0 and nude == limit and nude != 0:
+    if outfit_level_limit != 0 and outfit_level == limit and outfit_level != 0:
         imagebutton:
             auto "icons/sight_disabled_%s.webp"
             focus_mask None
             xalign 0.0 yalign 0.0
-            action Show("image_with_nude_var", dissolveM, paths, limit, 0)
+            action Show("image_with_outfit_var", dissolveM, paths, limit, 0)
 
-    if nude == 0 and limit > 0:
+    if outfit_level == 0 and limit > 0:
         imagebutton:
             auto "icons/eye_target_%s.webp"
             focus_mask None
             xalign 0.0 yalign 0.0
-            action Show("image_with_nude_var", dissolveM, paths, limit, 1)
+            action Show("image_with_outfit_var", dissolveM, paths, limit, 1)
 
-    if nude == 1 and limit > 1:
+    if outfit_level == 1 and limit > 1:
         imagebutton:
             auto "icons/fire_iris_%s.webp"
             focus_mask None
             xalign 0.0 yalign 0.0
-            action Show("image_with_nude_var", dissolveM, paths, limit, 2)
+            action Show("image_with_outfit_var", dissolveM, paths, limit, 2)
 
 # endregion
 #############################

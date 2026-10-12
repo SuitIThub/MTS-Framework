@@ -184,7 +184,7 @@ Character pattern keys (filled by those defaults, then `PDAImage`):
 | `char_var` | both | `1` | yes | body/head variant |
 | `pose` | both | `1` | no | shared pose index |
 | `outfit` | bottom | `"uniform"` | no | clothes set |
-| `level` | bottom | `1` | yes | campus-level / nude step |
+| `level` | bottom | `1` | yes | campus-level / outfit step |
 | `state` | bottom | `""` | yes | optional body state |
 | `extra1` | bottom | `""` | yes | optional special body sprite |
 | `mood` | top | `"happy"` | no | expression |
@@ -437,7 +437,7 @@ that those two will not cover, and never once per character.
 | Shake / blur / grayscale / tint | [Emphasis](#emphasis-shake-blur-grayscale) |
 | Hide one person, keep the other | [Hide one person](#hide-one-person-keep-the-other) |
 | Change location behind them | [Change the backdrop](#change-the-backdrop-mid-scene) |
-| Swap outfit or nude level | [Outfit or level swap](#outfit-or-level-swap) |
+| Swap outfit or outfit level | [Outfit or level swap](#outfit-or-level-swap) |
 | Stack something that isn't a character | [Non-character stack](#non-character-stack) |
 
 ### Scene image → talking figure
@@ -680,7 +680,7 @@ those keys. Framing (`alignX` / `zoom` / `flip`) is unchanged.
 
 ```python
 $ secretary.display(PDAImage(outfit = "casual", level = 1, mouth = "closed"))
-$ secretary.display(PDAImage(level = 3))    # nude-level step; body layer only
+$ secretary.display(PDAImage(level = 3))    # outfit level step; body layer only
 ```
 
 On **students**, `level=` is the school-level outfit step
@@ -860,7 +860,7 @@ for its source argument — all resolved by `_resolve_background_path`:
 | **Pattern string** | `"images/background/school building/<level> 0 1.webp"` | `<key>`/alt-key resolution like a layer (`refine_image_with_alternatives` → `find_available_images`) |
 | **Concrete path** | `"images/background/office building/secretary 6 1 0.webp"` | returned as-is if `renpy.loadable` |
 | **`Image_Series` step** | `image_series[step]` | `Image_Series.__getitem__` yields a concrete loadable path (or `None`); the path is used directly |
-| **Event path with `<nude>`** | a raw `get_image` result still holding `<nude>` | resolved via `get_image`, preferring the clothed level `0`, else the highest available nude level |
+| **Event path with `<outfit_level>`** | a raw `get_image` result still holding `<outfit_level>` | resolved via `get_image`, preferring the clothed level `0`, else the highest available outfit level |
 | **`None` / `""`** | `set_background(None)` | resolves to no background (empty) |
 
 The order matters: a **loadable concrete path wins immediately**, so an
@@ -1117,7 +1117,7 @@ pose/outfit/mood/mouth), while the in-game editor is still where you tune the
 `set_background_split(left=None, right=None, blur, blur_duration, separator_width, bw_left, bw_right, alt_keys, **kwargs)` ·
 `hide_background()` · `clear()`. Per object: `get_obj(key).hide_all_images()` hides
 that stack only (`clear()` hides every object plus the background). Background source = pattern string · concrete/loadable
-path · `Image_Series[step]` · `<nude>` event path · `None`. Globals:
+path · `Image_Series[step]` · `<outfit_level>` event path · `None`. Globals:
 `init_paperdoll_manager()` / `unload_paperdoll_manager()`.
 
 ### Object (`Paperdoll_Obj`)

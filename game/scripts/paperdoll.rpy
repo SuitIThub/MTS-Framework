@@ -1858,14 +1858,14 @@ init -99 python:
             if resolved_concrete != "":
                 return resolved_concrete
 
-            # Event-style path that still contains <nude> (e.g. raw get_image result)
-            if "<nude>" in pattern:
-                nude, resolved = get_image(pattern, **kwargs)
-                if nude < 0 or resolved == "":
+            # Event-style path that still contains <outfit_level> (e.g. raw get_image result)
+            if "<outfit_level>" in pattern:
+                outfit_level, resolved = get_image(pattern, **kwargs)
+                if outfit_level < 0 or resolved == "":
                     return ""
-                if "<nude>" in resolved:
-                    for level in [0] + list(range(nude, 0, -1)):
-                        candidate = find_loadable_image(resolved.replace("<nude>", str(level)))
+                if "<outfit_level>" in resolved:
+                    for level in [0] + list(range(outfit_level, 0, -1)):
+                        candidate = find_loadable_image(resolved.replace("<outfit_level>", str(level)))
                         if candidate != "":
                             return candidate
                     return ""
@@ -2116,7 +2116,7 @@ init -99 python:
         - ``char_var`` — body/head variant (``alt_keys``, default ``1``)
         - ``pose`` — shared pose index (default ``1``)
         - ``outfit`` — clothes set, body layer (default ``"uniform"``)
-        - ``level`` — campus-level / nude step, body layer (``alt_keys``, default ``1``)
+        - ``level`` — campus-level / outfit step, body layer (``alt_keys``, default ``1``)
         - ``state`` — optional body state (``alt_keys``, default ``""`` → '$')
         - ``extra1`` — optional special body sprite (``alt_keys``, default ``""`` → '$')
         - ``mood`` — expression, head layer (default ``"neutral"``)

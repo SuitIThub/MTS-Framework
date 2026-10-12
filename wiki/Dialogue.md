@@ -37,7 +37,7 @@ headmaster "Then let's stop waiting on it. Chase it today."
 
 The three moving parts:
 
-- **`Char`** — a *stat container* (level + corruption/inhibition/…). One per role/school.
+- **`Char`** — a *stat container* (level + motivation/shyness/…). One per role/school.
 - **`Person`** — the *actor*: name, description, portraits, paperdoll, and the speaking
   voice. It points at a `Char` for stats and for its styling category.
 - **The speaking `Character`** — built on demand by `Person.get_renpy_char()`; you never
@@ -69,7 +69,7 @@ Two classes, two jobs — don't conflate them.
   a small set of shared `Char`s — one per **role** (`school`, `parent`, `teacher`,
   `secretary`), reached with `get_character_by_key("...")`. Every student shares the one
   `school` char; every teacher shares the `teacher` char. That's why raising "the
-  school's" inhibition moves the whole class at once.
+  school's" shyness moves the whole class at once.
 - **`Person`** is the individual: `name` (the id), `first_name`/`last_name`, a
   `description`, `portraits`, paperdoll data, and `character` — the `Char` it draws stats
   and styling from. A `Person` is what speaks.

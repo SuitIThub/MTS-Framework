@@ -1079,10 +1079,6 @@ init -6 python:
                 if resolved:
                     output[f"Level {level}"] = resolved
 
-            resolved_nude = find_loadable_image(f"{self.basePath}images/characters/{self.name}/nude.webp")
-            if resolved_nude:
-                output["nude"] = resolved_nude
-
             for portrait_key in self.portraits.keys():
                 portrait = self.portraits[portrait_key]
                 if isinstance(portrait, str):
@@ -1301,8 +1297,8 @@ label load_schools ():
 
     $ load_character("secretary", "Secretary", charList['staff'], {
         'stats_objects': {
-            "corruption": Stat(CORRUPTION, 35),
-            "inhibition": Stat(INHIBITION, 50),
+            "motivation": Stat(MOTIVATION, 35),
+            "shyness": Stat(SHYNESS, 50),
             "happiness": Stat(HAPPINESS, 57),
             "education": Stat(EDUCATION, 28),
             "charm": Stat(CHARM, 35),
@@ -1312,8 +1308,8 @@ label load_schools ():
 
     $ load_character("parent", "Parents", charList, {
         'stats_objects': {
-            "corruption": Stat(CORRUPTION, 0),
-            "inhibition": Stat(INHIBITION, 100),
+            "motivation": Stat(MOTIVATION, 0),
+            "shyness": Stat(SHYNESS, 100),
             "happiness": Stat(HAPPINESS, 15),
             "education": Stat(EDUCATION, 15),
             "charm": Stat(CHARM, 28),
@@ -1323,8 +1319,8 @@ label load_schools ():
 
     $ load_character("teacher", "Teacher", charList['staff'], {
         'stats_objects': {
-            "corruption": Stat(CORRUPTION, 0),
-            "inhibition": Stat(INHIBITION, 100),
+            "motivation": Stat(MOTIVATION, 0),
+            "shyness": Stat(SHYNESS, 100),
             "happiness": Stat(HAPPINESS, 13),
             "education": Stat(EDUCATION, 35),
             "charm": Stat(CHARM, 14),
@@ -1334,8 +1330,8 @@ label load_schools ():
 
     $ load_character("staff", "Staff", charList['staff'],{
         'stats_objects': {
-            "corruption": Stat(CORRUPTION, 0),
-            "inhibition": Stat(INHIBITION, 100),
+            "motivation": Stat(MOTIVATION, 0),
+            "shyness": Stat(SHYNESS, 100),
             "happiness": Stat(HAPPINESS, 13),
             "education": Stat(EDUCATION, 35),
             "charm": Stat(CHARM, 14),

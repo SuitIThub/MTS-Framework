@@ -1,8 +1,7 @@
 # MTS Framework
 
-A Ren'Py framework for sandbox management games, extracted from *Mind the School*
-with all game content removed. It gives you the systems; you bring the story, the
-characters and the art.
+A Ren'Py framework for sandbox management games. It gives you the systems; you
+bring the story, the characters and the art.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![Made with Ren'Py](https://img.shields.io/badge/Made%20with-Ren'Py%208.1-red?style=flat-square)](https://www.renpy.org/)
@@ -51,13 +50,6 @@ paths. Set your game's name, version and links in `game/options.rpy`.
 
 The developer documentation lives in [`wiki/`](wiki/Home.md) — start with the
 [Developer Guide](wiki/Developer-Guide.md) and [Modding](wiki/Modding.md).
-
-## Content note
-
-The framework itself contains no adult content, but it was built for adult games
-and keeps the matching systems (e.g. nudity levels in image patterns). Games built
-on it are responsible for their own content and age gating; the default splash
-screen includes an 18+ confirmation.
 
 ## License
 

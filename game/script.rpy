@@ -40,17 +40,6 @@ label start ():
 
     call intro from _call_intro
 
-label splashscreen:
-    menu:
-        "This game is not suitable for children or those who are easily disturbed.\n\nBy playing this game you agree that you are 18 years of age or older."
-
-        "I am 18 years of age or older.":
-            pass
-        "I am not 18 years of age or older.":
-            $ renpy.quit()
-
-    return
-
 init python:
     
     ###########################################
@@ -82,8 +71,8 @@ init python:
 
         load_character("school", "School", charList, {
             'stats_objects': {
-                "corruption": Stat(CORRUPTION, 0),
-                "inhibition": Stat(INHIBITION, 100),
+                "motivation": Stat(MOTIVATION, 0),
+                "shyness": Stat(SHYNESS, 100),
                 "happiness": Stat(HAPPINESS, 12),
                 "education": Stat(EDUCATION, 9),
                 "charm": Stat(CHARM, 8),
